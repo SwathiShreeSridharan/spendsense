@@ -9,5 +9,4 @@ public class SpendSenseApplication {
 	public static void main(String[] args) {
 		SpringApplication.run(SpendSenseApplication.class, args);
 	}
-
 }

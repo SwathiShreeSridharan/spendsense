@@ -2,14 +2,18 @@ package com.spendsense.user.repository;
 
 import com.spendsense.user.entity.User;
 import org.junit.jupiter.api.Test;
+import org.mockito.Mock;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.*;
 
 @SpringBootTest
+@Transactional
 public class UserRepositoryTest {
 
     @Autowired
@@ -20,7 +24,7 @@ public class UserRepositoryTest {
         User user = new User(
                 "Swath",
                 "swa2@gmail.com",
-                "1234567",
+                "1234567890",
                 "hashed-password"
         );
 
@@ -35,8 +39,8 @@ public class UserRepositoryTest {
     void shouldFindUserByEmail(){
         User user = new User(
                 "Swath",
-                "swa@gmail.com",
-                "1234567",
+                "swa2@gmail.com",
+                "1234567890",
                 "hashed-password"
         );
 
@@ -46,6 +50,39 @@ public class UserRepositoryTest {
 
         assertTrue(foundUser.isPresent());
         assertEquals("Swath",foundUser.get().getName());
-        assertEquals("swa@gmail.com",foundUser.get().getEmail());
+        assertEquals("swa2@gmail.com",foundUser.get().getEmail());
+    }
+
+    @Test
+    void shouldReturnEmptyWhenEmailDoesNotExist() {
+        Optional<User> foundUser =
+                userRepository.findByEmail("unknown@gmail.com");
+
+        assertTrue(foundUser.isEmpty());
+    }
+
+    @Test
+    void shouldReturnTrueWhenEmailExists() {
+        User user = new User(
+                "Swathi",
+                "exists@gmail.com",
+                "9876543210",
+                "hashed-password"
+        );
+
+        userRepository.save(user);
+
+        boolean exists =
+                userRepository.existsByEmail("exists@gmail.com");
+
+        assertTrue(exists);
+    }
+
+    @Test
+    void shouldReturnFalseWhenEmailDoesNotExist() {
+        boolean exists =
+                userRepository.existsByEmail("unknown@gmail.com");
+
+        assertFalse(exists);
     }
 }

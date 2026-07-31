@@ -2,6 +2,7 @@ package com.spendsense.exception;
 
 import jakarta.servlet.http.HttpServletRequest;
 import org.apache.coyote.Response;
+import org.springframework.http.HttpOutputMessage;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.MethodArgumentNotValidException;
@@ -63,5 +64,18 @@ public class GlobalExceptionHandler {
         return ResponseEntity
                 .status(HttpStatus.UNAUTHORIZED)
                 .body(errorResponse);
+    }
+
+    @ExceptionHandler(DuplicateCategoryException.class)
+    public ResponseEntity<ApiErrorResponse> handleDuplicateCategory(DuplicateCategoryException exception,
+                                                                    HttpServletRequest request){
+        ApiErrorResponse errorResponse = new ApiErrorResponse(
+                LocalDateTime.now(),
+                HttpStatus.CONFLICT.value(),
+                HttpStatus.CONFLICT.getReasonPhrase(),
+                List.of(exception.getMessage()),
+                request.getRequestURI()
+        );
+        return ResponseEntity.status(HttpStatus.CONFLICT).body(errorResponse);
     }
 }

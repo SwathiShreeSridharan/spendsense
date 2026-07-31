@@ -64,6 +64,8 @@ public class User implements UserDetails {
         return userId;
     }
 
+    public void setUserId(UUID userId) { this.userId = userId; }
+
     public String getName() {
         return name;
     }

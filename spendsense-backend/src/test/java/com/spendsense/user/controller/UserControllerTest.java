@@ -2,7 +2,7 @@ package com.spendsense.user.controller;
 
 
 
-import com.spendsense.exception.DuplicateEmailException;
+import com.spendsense.user.exception.DuplicateEmailException;
 import com.spendsense.user.dto.RegisterUserRequest;
 import com.spendsense.user.dto.UserResponse;
 import com.spendsense.user.entity.UserStatus;

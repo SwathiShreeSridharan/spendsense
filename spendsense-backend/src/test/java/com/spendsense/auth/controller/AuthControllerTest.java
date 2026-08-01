@@ -5,7 +5,7 @@ import com.spendsense.auth.dto.LoginResponse;
 import com.spendsense.auth.service.AuthService;
 
 import com.spendsense.exception.GlobalExceptionHandler;
-import com.spendsense.exception.InvalidCredentialsException;
+import com.spendsense.user.exception.InvalidCredentialsException;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;

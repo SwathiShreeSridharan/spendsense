@@ -1,6 +1,6 @@
 package com.spendsense.user.service;
 
-import com.spendsense.exception.DuplicateEmailException;
+import com.spendsense.user.exception.DuplicateEmailException;
 import com.spendsense.user.dto.RegisterUserRequest;
 import com.spendsense.user.dto.UserProfileResponse;
 import com.spendsense.user.dto.UserResponse;
@@ -8,7 +8,6 @@ import com.spendsense.user.entity.User;
 import com.spendsense.user.repository.UserRepository;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
-import org.springframework.web.bind.annotation.GetMapping;
 
 import java.util.Optional;
 

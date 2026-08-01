@@ -2,7 +2,7 @@ package com.spendsense.auth.service;
 
 import com.spendsense.auth.dto.LoginRequest;
 import com.spendsense.auth.dto.LoginResponse;
-import com.spendsense.exception.InvalidCredentialsException;
+import com.spendsense.user.exception.InvalidCredentialsException;
 import com.spendsense.user.entity.User;
 import com.spendsense.user.repository.UserRepository;
 import org.junit.jupiter.api.Test;

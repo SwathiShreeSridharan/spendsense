@@ -1,4 +1,4 @@
-package com.spendsense.exception;
+package com.spendsense.user.exception;
 
 public class DuplicateEmailException extends RuntimeException{
 

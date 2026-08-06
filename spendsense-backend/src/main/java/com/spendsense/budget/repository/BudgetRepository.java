@@ -66,6 +66,7 @@ public interface BudgetRepository extends JpaRepository<Budget, UUID> {
     FROM Expense e
     WHERE e.group = :group
       AND e.expenseDate BETWEEN :startDate AND :endDate
+      AND e.archived = false
     """)
     BigDecimal sumByGroupAndDateRange(
             @Param("group") Group group,

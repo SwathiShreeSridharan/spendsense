@@ -1,0 +1,8 @@
+# IDE configuration
+.idea/
+
+# Local project backup archives
+spendsense-backend*.zip
+
+# Temporary logs
+*.log

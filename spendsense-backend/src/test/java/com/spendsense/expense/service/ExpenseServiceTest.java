@@ -3,12 +3,21 @@ package com.spendsense.expense.service;
 import com.spendsense.category.entity.Category;
 import com.spendsense.category.repository.CategoryRepository;
 import com.spendsense.exception.CategoryNotFoundException;
+import com.spendsense.exception.GroupNotFoundException;
 import com.spendsense.expense.dto.CreateExpenseRequest;
 import com.spendsense.expense.dto.ExpenseResponse;
 import com.spendsense.expense.entity.Expense;
 import com.spendsense.expense.repository.ExpenseRepository;
+import com.spendsense.group.entity.Group;
+import com.spendsense.group.entity.GroupMember;
+import com.spendsense.group.entity.GroupRole;
+import com.spendsense.group.repository.GroupMemberRepository;
+import com.spendsense.group.repository.GroupRepository;
+import com.spendsense.group.service.GroupAccessService;
+import com.spendsense.security.CurrentUserService;
 import com.spendsense.user.entity.User;
 import com.spendsense.user.repository.UserRepository;
+import net.bytebuddy.asm.MemberSubstitution;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -39,25 +48,34 @@ public class ExpenseServiceTest {
     private CategoryRepository categoryRepository;
 
     @Mock
-    private UserRepository userRepository;
+    private CurrentUserService currentUserService;
+
+    @Mock
+    private GroupAccessService groupAccessService;
 
     @InjectMocks
     private ExpenseService expenseService;
 
     private User user;
+    private Group group;
+    private UUID groupId;
 
     @BeforeEach
     void setup() {
+        groupId = UUID.randomUUID();
+
+        group = new Group();
+        group.setGroupId(groupId);
+        group.setName("Family");
+
 
         user = new User();
         user.setEmail("test@gmail.com");
 
-        SecurityContextHolder.getContext().setAuthentication(
-                new UsernamePasswordAuthenticationToken(
-                        "test@gmail.com",
-                        null
-                )
-        );
+        when(currentUserService.getCurrentUser()).thenReturn(user);
+
+        when(groupAccessService.requireMember(groupId, user))
+                .thenReturn(group);
     }
 
     @Test
@@ -70,6 +88,7 @@ public class ExpenseServiceTest {
                 "restaurant",
                 "#4CAF50",
                 true,
+                group,
                 user
         );
 
@@ -82,17 +101,15 @@ public class ExpenseServiceTest {
                         categoryId
                 );
 
-        when(userRepository.findByEmail("test@gmail.com"))
-                .thenReturn(Optional.of(user));
 
-        when(categoryRepository.findById(categoryId))
+        when(categoryRepository.findByCategoryIdAndGroup(categoryId,group))
                 .thenReturn(Optional.of(category));
 
         when(expenseRepository.save(any()))
                 .thenAnswer(invocation -> invocation.getArgument(0));
 
         ExpenseResponse response =
-                expenseService.createExpense(request);
+                expenseService.createExpense(groupId,request);
 
         assertEquals("Lunch", response.getTitle());
         assertEquals("Food", response.getCategoryName());
@@ -106,11 +123,14 @@ public class ExpenseServiceTest {
         Expense savedExpense = captor.getValue();
 
         assertEquals("Lunch", savedExpense.getTitle());
+        assertEquals(group, savedExpense.getGroup());
         assertEquals(category, savedExpense.getCategory());
+        assertEquals(user, savedExpense.getCreatedBy());
+        assertEquals(user, savedExpense.getPaidBy());
     }
 
     @Test
-    void shouldThrowCategoryNotFoundException() {
+    void shouldRejectCategoryThatDoesNotBelongToGroup() {
 
         UUID categoryId = UUID.randomUUID();
 
@@ -123,15 +143,12 @@ public class ExpenseServiceTest {
                         categoryId
                 );
 
-        when(userRepository.findByEmail("test@gmail.com"))
-                .thenReturn(Optional.of(user));
-
-        when(categoryRepository.findById(categoryId))
+        when(categoryRepository.findByCategoryIdAndGroup(categoryId,group))
                 .thenReturn(Optional.empty());
 
         assertThrows(
                 CategoryNotFoundException.class,
-                () -> expenseService.createExpense(request)
+                () -> expenseService.createExpense(groupId,request)
         );
 
         verify(expenseRepository, never())
@@ -146,6 +163,7 @@ public class ExpenseServiceTest {
                 "restaurant",
                 "#4CAF50",
                 true,
+                group,
                 user
         );
 
@@ -154,24 +172,63 @@ public class ExpenseServiceTest {
                 "Office Lunch",
                 BigDecimal.valueOf(250),
                 LocalDate.now(),
+                group,
                 category,
                 user,
                 user
         );
 
-        when(userRepository.findByEmail("test@gmail.com"))
-                .thenReturn(Optional.of(user));
-
-        when(expenseRepository.findByCreatedBy(user))
+        when(expenseRepository.findByGroupOrderByExpenseDateDescCreatedAtDesc(group))
                 .thenReturn(List.of(expense));
 
         List<ExpenseResponse> responses =
-                expenseService.getExpenses();
+                expenseService.getExpenses(groupId);
 
         assertEquals(1, responses.size());
         assertEquals("Lunch", responses.getFirst().getTitle());
 
         verify(expenseRepository)
-                .findByCreatedBy(user);
+                .findByGroupOrderByExpenseDateDescCreatedAtDesc(group);
+    }
+
+    @Test
+    void shouldRejectExpenseCreationWhenUserIsNotGroupMember() {
+
+        UUID categoryId = UUID.randomUUID();
+
+        CreateExpenseRequest request =
+                new CreateExpenseRequest(
+                        "Lunch",
+                        "Office Lunch",
+                        BigDecimal.valueOf(250),
+                        LocalDate.now(),
+                        categoryId
+                );
+
+        reset(groupAccessService);
+
+        when(groupAccessService.requireMember(groupId, user))
+                .thenThrow(
+                        new GroupNotFoundException(
+                                "Group not found"
+                        )
+                );
+
+        assertThrows(
+                GroupNotFoundException.class,
+                () -> expenseService.createExpense(
+                        groupId,
+                        request
+                )
+        );
+
+        verify(categoryRepository, never())
+                .findByCategoryIdAndGroup(
+                        any(UUID.class),
+                        any(Group.class)
+                );
+
+        verify(expenseRepository, never())
+                .save(any());
     }
 }

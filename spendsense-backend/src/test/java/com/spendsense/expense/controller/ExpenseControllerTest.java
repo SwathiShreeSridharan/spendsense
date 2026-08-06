@@ -22,6 +22,7 @@ import java.util.List;
 import java.util.UUID;
 
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -48,6 +49,8 @@ public class ExpenseControllerTest {
     private JwtAuthenticationFilter jwtAuthenticationFilter;
 
     private ObjectMapper objectMapper = new ObjectMapper().registerModule(new JavaTimeModule());
+
+    UUID groupId = UUID.randomUUID();
 
     @Test
     void shouldCreateExpenseSuccessfully() throws Exception {
@@ -77,11 +80,11 @@ public class ExpenseControllerTest {
                         true
                 );
 
-        when(expenseService.createExpense(any()))
+        when(expenseService.createExpense(eq(groupId), any(CreateExpenseRequest.class)))
                 .thenReturn(response);
 
         mockMvc.perform(
-                        post("/api/v1/expenses")
+                        post("/api/v1/groups/{groupId}/expenses",groupId)
                                 .contentType(MediaType.APPLICATION_JSON)
                                 .content(objectMapper.writeValueAsString(request))
                 )
@@ -97,11 +100,12 @@ public class ExpenseControllerTest {
                         .value("Food"));
 
         verify(expenseService)
-                .createExpense(any());
+                .createExpense(eq(groupId),any(CreateExpenseRequest.class));
     }
 
     @Test
     void shouldGetExpensesSuccessfully() throws Exception {
+        UUID groupId = UUID.randomUUID();
 
         ExpenseResponse lunch =
                 new ExpenseResponse(
@@ -131,11 +135,11 @@ public class ExpenseControllerTest {
                         true
                 );
 
-        when(expenseService.getExpenses())
+        when(expenseService.getExpenses(groupId))
                 .thenReturn(List.of(lunch, movie));
 
         mockMvc.perform(
-                        get("/api/v1/expenses")
+                        get("/api/v1/groups/{groupId}/expenses",groupId)
                                 .contentType(MediaType.APPLICATION_JSON)
                 )
                 .andExpect(status().isOk())
@@ -150,7 +154,7 @@ public class ExpenseControllerTest {
                         .value("Movie"));
 
         verify(expenseService)
-                .getExpenses();
+                .getExpenses(groupId);
     }
 
 }

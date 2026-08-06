@@ -4,10 +4,11 @@ import com.spendsense.auth.dto.LoginRequest;
 import com.spendsense.auth.dto.LoginResponse;
 import com.spendsense.security.JwtService;
 import com.spendsense.user.entity.User;
-import io.jsonwebtoken.Jwt;
+import com.spendsense.user.exception.InvalidCredentialsException;
 import org.springframework.security.authentication.AuthenticationManager;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.Authentication;
+import org.springframework.security.core.AuthenticationException;
 import org.springframework.stereotype.Service;
 
 @Service
@@ -21,15 +22,23 @@ public class AuthService {
     }
 
     public LoginResponse login(LoginRequest request){
-        Authentication authentication = authenticationManager
-                .authenticate(new UsernamePasswordAuthenticationToken(
-                        request.getEmail(),
-                        request.getPassword()
-                        )
-                );
-        User user = (User) authentication.getPrincipal();
+        Authentication authentication;
 
-        assert user != null;
+        try {
+            authentication =
+                    authenticationManager.authenticate(
+                            new UsernamePasswordAuthenticationToken(
+                                    request.getEmail(),
+                                    request.getPassword()
+                            )
+                    );
+        }
+        catch (AuthenticationException exception) {
+            throw new InvalidCredentialsException(
+                    "Invalid email or password"
+            );
+        }
+        User user = (User) authentication.getPrincipal();
 
         String token = jwtService.generateToken(user);
 

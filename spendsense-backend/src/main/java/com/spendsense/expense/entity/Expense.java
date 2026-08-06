@@ -9,6 +9,8 @@ import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.UUID;
 
+import com.spendsense.group.entity.Group;
+
 @Entity
 @Table(name = "expenses")
 public class Expense {
@@ -29,6 +31,10 @@ public class Expense {
 
     @Column(name = "expense_date", nullable = false)
     private LocalDate expenseDate;
+
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "group_id", nullable = false)
+    private Group group;
 
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "category_id", nullable = false)
@@ -56,6 +62,7 @@ public class Expense {
             String description,
             BigDecimal amount,
             LocalDate expenseDate,
+            Group group,
             Category category,
             User createdBy,
             User paidBy
@@ -64,10 +71,12 @@ public class Expense {
         this.description = description;
         this.amount = amount;
         this.expenseDate = expenseDate;
+        this.group = group;
         this.category = category;
         this.createdBy = createdBy;
         this.paidBy = paidBy;
     }
+
 
     @PrePersist
     public void prePersist() {
@@ -159,5 +168,13 @@ public class Expense {
 
     public void setUpdatedAt(LocalDateTime updatedAt) {
         this.updatedAt = updatedAt;
+    }
+
+    public Group getGroup() {
+        return group;
+    }
+
+    public void setGroup(Group group) {
+        this.group = group;
     }
 }

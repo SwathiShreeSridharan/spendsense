@@ -2,6 +2,8 @@ package com.spendsense.user.controller;
 
 
 
+import com.spendsense.security.JwtAuthenticationFilter;
+import com.spendsense.user.dto.UserProfileResponse;
 import com.spendsense.user.exception.DuplicateEmailException;
 import com.spendsense.user.dto.RegisterUserRequest;
 import com.spendsense.user.dto.UserResponse;
@@ -9,6 +11,7 @@ import com.spendsense.user.entity.UserStatus;
 import com.spendsense.user.service.UserService;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
 import org.springframework.http.MediaType;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
@@ -20,12 +23,14 @@ import java.util.UUID;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.*;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultHandlers.print;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 
 @WebMvcTest(UserController.class)
+@AutoConfigureMockMvc(addFilters = false)
 public class UserControllerTest {
 
     @Autowired
@@ -33,6 +38,9 @@ public class UserControllerTest {
 
     @MockitoBean
     private UserService userService;
+
+    @MockitoBean
+    private JwtAuthenticationFilter jwtAuthenticationFilter;
 
     @Test
     void shouldRegisterUserSuccessfully() throws Exception {
@@ -120,5 +128,37 @@ public class UserControllerTest {
 
         verify(userService)
                 .registerUser(any(RegisterUserRequest.class));
+    }
+
+    @Test
+    void shouldReturnCurrentUserProfile() throws Exception {
+        UUID userId = UUID.randomUUID();
+
+        UserProfileResponse response =
+                new UserProfileResponse(
+                        userId,
+                        "Swathi",
+                        "swa@gmail.com",
+                        "9876543210"
+                );
+
+        when(userService.getCurrentUserProfile())
+                .thenReturn(response);
+
+        mockMvc.perform(
+                        get("/api/v1/users/me")
+                                .contentType(MediaType.APPLICATION_JSON)
+                )
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.userId")
+                        .value(userId.toString()))
+                .andExpect(jsonPath("$.name")
+                        .value("Swathi"))
+                .andExpect(jsonPath("$.email")
+                        .value("swa@gmail.com"))
+                .andExpect(jsonPath("$.mobileNumber")
+                        .value("9876543210"));
+
+        verify(userService).getCurrentUserProfile();
     }
 }

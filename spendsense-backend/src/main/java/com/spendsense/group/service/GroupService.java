@@ -1,18 +1,14 @@
 package com.spendsense.group.service;
 
 import com.spendsense.exception.DuplicateGroupException;
-import com.spendsense.exception.GroupAccessDeniedException;
-import com.spendsense.exception.GroupNotFoundException;
 import com.spendsense.group.dto.CreateGroupRequest;
 import com.spendsense.group.dto.GroupResponse;
 import com.spendsense.group.dto.UpdateGroupRequest;
 import com.spendsense.group.entity.*;
 import com.spendsense.group.repository.GroupMemberRepository;
 import com.spendsense.group.repository.GroupRepository;
+import com.spendsense.security.CurrentUserService;
 import com.spendsense.user.entity.User;
-import com.spendsense.user.repository.UserRepository;
-import org.springframework.security.core.Authentication;
-import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -25,22 +21,25 @@ public class GroupService {
 
     private final GroupRepository groupRepository;
     private final GroupMemberRepository groupMemberRepository;
-    private final UserRepository userRepository;
+    private final CurrentUserService currentUserService;
+    private final GroupAccessService groupAccessService;
 
     public GroupService(
             GroupRepository groupRepository,
             GroupMemberRepository groupMemberRepository,
-            UserRepository userRepository
+            CurrentUserService currentUserService,
+            GroupAccessService groupAccessService
     ) {
         this.groupRepository = groupRepository;
         this.groupMemberRepository = groupMemberRepository;
-        this.userRepository = userRepository;
+        this.currentUserService = currentUserService;
+        this.groupAccessService = groupAccessService;
     }
 
     @Transactional
     public GroupResponse createGroup(CreateGroupRequest request) {
 
-        User currentUser = getCurrentUser();
+        User currentUser = currentUserService.getCurrentUser();
 
         boolean exists = groupRepository
                 .existsByCreatedByAndNameIgnoreCaseAndArchivedFalse(currentUser,
@@ -104,7 +103,7 @@ public class GroupService {
     @Transactional(readOnly = true)
     public List<GroupResponse> getMyGroups() {
 
-        User currentUser = getCurrentUser();
+        User currentUser = currentUserService.getCurrentUser();
 
         List<GroupMember> memberships =
                 groupMemberRepository.findByUser(currentUser);
@@ -119,20 +118,14 @@ public class GroupService {
 
     @Transactional(readOnly = true)
     public GroupResponse getGroupById(UUID groupId) {
-        User currentUser = getCurrentUser();
+        User currentUser =
+                currentUserService.getCurrentUser();
 
-        Group group = groupRepository
-                .findByGroupIdAndArchivedFalse(groupId)
-                .orElseThrow(
-                        () -> new GroupNotFoundException("Group not found")
+        Group group =
+                groupAccessService.requireMember(
+                        groupId,
+                        currentUser
                 );
-
-        boolean isMember = groupMemberRepository
-                .existsByGroupAndUser(group, currentUser);
-
-        if (!isMember) {
-            throw new GroupNotFoundException("Group not found");
-        }
 
         return mapToResponse(group);
 
@@ -143,45 +136,47 @@ public class GroupService {
             UUID groupId,
             UpdateGroupRequest request
     ) {
-        User currentUser = getCurrentUser();
+        User currentUser =
+                currentUserService.getCurrentUser();
 
-        Group group = groupRepository
-                .findByGroupIdAndArchivedFalse(groupId)
-                .orElseThrow(
-                        () -> new GroupNotFoundException("Group not found")
+        Group group =
+                groupAccessService.requireOwner(
+                        groupId,
+                        currentUser
                 );
 
-        GroupMember member = groupMemberRepository
-                .findByGroupAndUser(group, currentUser)
-                .orElseThrow(
-                        () -> new GroupNotFoundException("Group not found")
-                );
-
-        if (member.getRole() != GroupRole.OWNER) {
-            throw new GroupAccessDeniedException("Only the group owner can update the group");
-        }
-
-        String newName = request.getName().trim();
+        String newName =
+                request.getName().trim();
 
         if (!group.getName().equalsIgnoreCase(newName)) {
 
-            boolean exists = groupRepository
-                    .existsByCreatedByAndNameIgnoreCaseAndArchivedFalse(
-                            currentUser,
-                            newName
-                    );
+            boolean exists =
+                    groupRepository
+                            .existsByCreatedByAndNameIgnoreCaseAndArchivedFalse(
+                                    currentUser,
+                                    newName
+                            );
 
             if (exists) {
-                throw new DuplicateGroupException("Group already exists");
+                throw new DuplicateGroupException(
+                        "Group already exists"
+                );
             }
         }
 
         group.setName(newName);
-        group.setDescription(request.getDescription());
-        group.setColor(request.getColor());
-        group.setIcon(request.getIcon());
+        group.setDescription(
+                request.getDescription()
+        );
+        group.setColor(
+                request.getColor()
+        );
+        group.setIcon(
+                request.getIcon()
+        );
 
-        Group updatedGroup = groupRepository.save(group);
+        Group updatedGroup =
+                groupRepository.save(group);
 
         return mapToResponse(updatedGroup);
     }
@@ -189,46 +184,18 @@ public class GroupService {
     @Transactional
     public void archiveGroup(UUID groupId) {
 
-        User currentUser = getCurrentUser();
+        User currentUser =
+                currentUserService.getCurrentUser();
 
-        Group group = groupRepository
-                .findByGroupIdAndArchivedFalse(groupId)
-                .orElseThrow(
-                        () -> new GroupNotFoundException("Group not found")
+        Group group =
+                groupAccessService.requireOwner(
+                        groupId,
+                        currentUser
                 );
-
-        GroupMember member = groupMemberRepository
-                .findByGroupAndUser(group, currentUser)
-                .orElseThrow(
-                        () -> new GroupNotFoundException("Group not found")
-                );
-
-        if (member.getRole() != GroupRole.OWNER) {
-            throw new GroupAccessDeniedException(
-                    "Only the group owner can archive the group"
-            );
-        }
 
         group.setArchived(true);
 
         groupRepository.save(group);
-
-    }
-
-    private User getCurrentUser() {
-
-        Authentication authentication =
-                SecurityContextHolder
-                        .getContext()
-                        .getAuthentication();
-
-        String email = authentication.getName();
-
-        return userRepository
-                .findByEmail(email)
-                .orElseThrow(
-                        () -> new RuntimeException("User not found")
-                );
     }
 
     private GroupResponse mapToResponse(Group group) {

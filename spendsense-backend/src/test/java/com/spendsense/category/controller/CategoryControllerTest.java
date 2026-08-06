@@ -15,10 +15,12 @@ import org.springframework.http.MediaType;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 
+
 import java.util.List;
 import java.util.UUID;
 
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -62,11 +64,15 @@ class CategoryControllerTest {
                         "#757575",
                         false
                 );
-        when(categoryService.createCategory(any()))
+
+        UUID groupId = UUID.randomUUID();
+        when(categoryService.createCategory(
+                eq(groupId),
+                any(CreateCategoryRequest.class)))
                 .thenReturn(response);
 
         mockMvc.perform(
-                        post("/api/v1/categories")
+                        post("/api/v1/groups/{groupId}/categories", groupId)
                                 .contentType(MediaType.APPLICATION_JSON)
                                 .content(
                                         objectMapper.writeValueAsString(request)
@@ -78,7 +84,9 @@ class CategoryControllerTest {
                 .andExpect(jsonPath("$.default")
                         .value(false));
         verify(categoryService)
-                .createCategory(any());
+                .createCategory(
+                        eq(groupId),any(CreateCategoryRequest.class)
+                );
     }
 
     @Test
@@ -101,13 +109,15 @@ class CategoryControllerTest {
                         false
                 );
 
-        when(categoryService.getCategories())
+        UUID groupId = UUID.randomUUID();
+
+        when(categoryService.getCategories(groupId))
                 .thenReturn(
                         List.of(food, petCare)
                 );
 
         mockMvc.perform(
-                        get("/api/v1/categories")
+                        get("/api/v1/groups/{groupId}/categories", groupId)
                                 .contentType(MediaType.APPLICATION_JSON)
                 )
                 .andExpect(status().isOk())
@@ -127,6 +137,6 @@ class CategoryControllerTest {
                 .andExpect(jsonPath("$[1].default")
                         .value(false));
         verify(categoryService)
-                .getCategories();
+                .getCategories(groupId);
     }
 }

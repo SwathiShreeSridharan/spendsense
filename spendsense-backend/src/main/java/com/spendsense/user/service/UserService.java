@@ -1,5 +1,6 @@
 package com.spendsense.user.service;
 
+import com.spendsense.security.CurrentUserService;
 import com.spendsense.user.exception.DuplicateEmailException;
 import com.spendsense.user.dto.RegisterUserRequest;
 import com.spendsense.user.dto.UserProfileResponse;
@@ -16,37 +17,51 @@ public class UserService {
 
     private final UserRepository userRepository;
     private final PasswordEncoder passwordEncoder;
+    private final CurrentUserService currentUserService;
 
-    public UserService(UserRepository userRepository, PasswordEncoder passwordEncoder){
+    public UserService(UserRepository userRepository, PasswordEncoder passwordEncoder, CurrentUserService currentUserService){
         this.userRepository = userRepository;
         this.passwordEncoder = passwordEncoder;
+        this.currentUserService = currentUserService;
     }
 
-    public UserResponse registerUser(RegisterUserRequest request){
-        Optional<User> existingUser = userRepository.findByEmail(request.getEmail());
-        if(existingUser.isPresent()){
-            throw new DuplicateEmailException("Email is already registered");
+    public UserResponse registerUser(RegisterUserRequest request) {
+        if (userRepository.existsByEmail(request.getEmail())) {
+            throw new DuplicateEmailException(
+                    "Email is already registered"
+            );
         }
-        String hashedPassword = hashPassword(request.getPassword());
 
-        User user = new User(request.getName(), request.getEmail(), request.getMobileNumber(), hashedPassword);
+        String hashedPassword =
+                passwordEncoder.encode(request.getPassword());
+
+        User user = new User(
+                request.getName(),
+                request.getEmail(),
+                request.getMobileNumber(),
+                hashedPassword
+        );
 
         User savedUser = userRepository.save(user);
 
-        return new UserResponse(user.getUserId(),user.getName(),user.getEmail(),
-                user.getMobileNumber(),user.getStatus(),user.getCreatedAt());
-    }
-
-    public UserProfileResponse getCurrentUser(User user){
-        return new UserProfileResponse(
-                user.getUserId(),
-                user.getName(),
-                user.getEmail(),
-                user.getMobileNumber()
+        return new UserResponse(
+                savedUser.getUserId(),
+                savedUser.getName(),
+                savedUser.getEmail(),
+                savedUser.getMobileNumber(),
+                savedUser.getStatus(),
+                savedUser.getCreatedAt()
         );
     }
 
-    private String hashPassword(String password){
-        return passwordEncoder.encode(password);
+    public UserProfileResponse getCurrentUserProfile(){
+        User currentUser = currentUserService.getCurrentUser();
+
+        return new UserProfileResponse(
+                currentUser.getUserId(),
+                currentUser.getName(),
+                currentUser.getEmail(),
+                currentUser.getMobileNumber()
+        );
     }
 }

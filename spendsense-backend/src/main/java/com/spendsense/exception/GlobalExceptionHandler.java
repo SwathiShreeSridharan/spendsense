@@ -3,6 +3,8 @@ package com.spendsense.exception;
 import com.spendsense.user.exception.DuplicateEmailException;
 import com.spendsense.user.exception.InvalidCredentialsException;
 import jakarta.servlet.http.HttpServletRequest;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.MethodArgumentNotValidException;
@@ -14,16 +16,43 @@ import java.util.List;
 
 @RestControllerAdvice
 public class GlobalExceptionHandler {
-    @ExceptionHandler(DuplicateEmailException.class)
-    public ResponseEntity<ApiErrorResponse> handleDuplicateEmail(DuplicateEmailException exception, HttpServletRequest request){
-        ApiErrorResponse errorResponse = new ApiErrorResponse(
-                LocalDateTime.now(),
-                HttpStatus.CONFLICT.value(),
-                HttpStatus.CONFLICT.getReasonPhrase(),
-                List.of(exception.getMessage()),
-                request.getRequestURI()
+
+    private static final Logger log =
+            LoggerFactory.getLogger(
+                    GlobalExceptionHandler.class
+            );
+
+    @ExceptionHandler({
+            DuplicateEmailException.class,
+            DuplicateCategoryException.class,
+            DuplicateGroupException.class,
+            BudgetAlreadyExistsException.class
+    })
+    public ResponseEntity<ApiErrorResponse> handleConflict(
+            RuntimeException exception,
+            HttpServletRequest request
+    ) {
+        return buildErrorResponse(
+                HttpStatus.CONFLICT,
+                exception.getMessage(),
+                request
         );
-        return ResponseEntity.status(HttpStatus.CONFLICT).body(errorResponse);
+    }
+
+    @ExceptionHandler({
+            CategoryNotFoundException.class,
+            GroupNotFoundException.class,
+            BudgetNotFoundException.class
+    })
+    public ResponseEntity<ApiErrorResponse> handleNotFound(
+            RuntimeException exception,
+            HttpServletRequest request
+    ) {
+        return buildErrorResponse(
+                HttpStatus.NOT_FOUND,
+                exception.getMessage(),
+                request
+        );
     }
 
     @ExceptionHandler(MethodArgumentNotValidException.class)
@@ -64,66 +93,6 @@ public class GlobalExceptionHandler {
                 .body(errorResponse);
     }
 
-    @ExceptionHandler(DuplicateCategoryException.class)
-    public ResponseEntity<ApiErrorResponse> handleDuplicateCategory(DuplicateCategoryException exception,
-                                                                    HttpServletRequest request){
-        ApiErrorResponse errorResponse = new ApiErrorResponse(
-                LocalDateTime.now(),
-                HttpStatus.CONFLICT.value(),
-                HttpStatus.CONFLICT.getReasonPhrase(),
-                List.of(exception.getMessage()),
-                request.getRequestURI()
-        );
-        return ResponseEntity
-                .status(HttpStatus.CONFLICT)
-                .body(errorResponse);
-    }
-
-    @ExceptionHandler(CategoryNotFoundException.class)
-    public ResponseEntity<ApiErrorResponse> handleCategoryNotFoundException(CategoryNotFoundException exception,
-                                                                            HttpServletRequest request){
-
-        ApiErrorResponse errorResponse = new ApiErrorResponse(
-                LocalDateTime.now(),
-                HttpStatus.NOT_FOUND.value(),
-                HttpStatus.NOT_FOUND.getReasonPhrase(),
-                List.of(exception.getMessage()),
-                request.getRequestURI()
-        );
-        return ResponseEntity
-                .status(HttpStatus.NOT_FOUND)
-                .body(errorResponse);
-    }
-
-    @ExceptionHandler(GroupNotFoundException.class)
-    public ResponseEntity<ApiErrorResponse> handleGroupNotFoundException(GroupNotFoundException exception, HttpServletRequest request){
-
-        ApiErrorResponse errorResponse = new ApiErrorResponse(
-                LocalDateTime.now(),
-                HttpStatus.NOT_FOUND.value(),
-                HttpStatus.NOT_FOUND.getReasonPhrase(),
-                List.of(exception.getMessage()),
-                request.getRequestURI()
-        );
-        return ResponseEntity
-                .status(HttpStatus.NOT_FOUND)
-                .body(errorResponse);
-    }
-
-    @ExceptionHandler(DuplicateGroupException.class)
-    public ResponseEntity<ApiErrorResponse> handleDuplicateGroupException(GroupNotFoundException exception, HttpServletRequest request){
-
-        ApiErrorResponse errorResponse = new ApiErrorResponse(
-                LocalDateTime.now(),
-                HttpStatus.CONFLICT.value(),
-                HttpStatus.CONFLICT.getReasonPhrase(),
-                List.of(exception.getMessage()),
-                request.getRequestURI()
-        );
-        return ResponseEntity
-                .status(HttpStatus.CONFLICT)
-                .body(errorResponse);
-    }
 
     @ExceptionHandler(GroupAccessDeniedException.class)
     public ResponseEntity<ApiErrorResponse> handleGroupAccessDenied(
@@ -142,38 +111,22 @@ public class GlobalExceptionHandler {
                 .body(error);
     }
 
-    @ExceptionHandler(BudgetNotFoundException.class)
-    public ResponseEntity<ApiErrorResponse> handleBudgetNotFound(
-            BudgetNotFoundException exception, HttpServletRequest request
+    @ExceptionHandler(Exception.class)
+    public ResponseEntity<ApiErrorResponse> handleUnexpectedException(
+            Exception exception,
+            HttpServletRequest request
     ) {
-        ApiErrorResponse error = new ApiErrorResponse(
-                LocalDateTime.now(),
-                HttpStatus.NOT_FOUND.value(),
-                HttpStatus.NOT_FOUND.getReasonPhrase(),
-                List.of(exception.getMessage()),
-                request.getRequestURI()
+        log.error(
+                "Unexpected error while processing {}",
+                request.getRequestURI(),
+                exception
         );
 
-        return ResponseEntity
-                .status(HttpStatus.NOT_FOUND)
-                .body(error);
-    }
-
-    @ExceptionHandler(BudgetAlreadyExistsException.class)
-    public ResponseEntity<ApiErrorResponse> handleBudgetAlreadyExists(
-            BudgetAlreadyExistsException exception, HttpServletRequest request
-    ) {
-        ApiErrorResponse error = new ApiErrorResponse(
-                LocalDateTime.now(),
-                HttpStatus.CONFLICT.value(),
-                HttpStatus.CONFLICT.getReasonPhrase(),
-                List.of(exception.getMessage()),
-                request.getRequestURI()
+        return buildErrorResponse(
+                HttpStatus.INTERNAL_SERVER_ERROR,
+                "An unexpected error occurred",
+                request
         );
-
-        return ResponseEntity
-                .status(HttpStatus.CONFLICT)
-                .body(error);
     }
 
     @ExceptionHandler(BudgetAccessDeniedException.class)
@@ -225,5 +178,24 @@ public class GlobalExceptionHandler {
         return ResponseEntity
                 .status(HttpStatus.BAD_REQUEST)
                 .body(error);
+    }
+
+    private ResponseEntity<ApiErrorResponse> buildErrorResponse(
+            HttpStatus status,
+            String message,
+            HttpServletRequest request
+    ) {
+        ApiErrorResponse errorResponse =
+                new ApiErrorResponse(
+                        LocalDateTime.now(),
+                        status.value(),
+                        status.getReasonPhrase(),
+                        List.of(message),
+                        request.getRequestURI()
+                );
+
+        return ResponseEntity
+                .status(status)
+                .body(errorResponse);
     }
 }

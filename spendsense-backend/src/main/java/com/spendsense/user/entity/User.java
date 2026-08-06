@@ -1,6 +1,5 @@
 package com.spendsense.user.entity;
 
-import io.jsonwebtoken.lang.Collections;
 import jakarta.persistence.*;
 import org.jspecify.annotations.Nullable;
 import org.springframework.data.annotation.CreatedDate;
@@ -128,12 +127,17 @@ public class User implements UserDetails {
     }
 
     @Override
-    public @Nullable String getPassword() {
-        return this.passwordHash;
+    public String getPassword() {
+        return passwordHash;
     }
 
     @Override
     public String getUsername() {
         return this.email;
+    }
+
+    @Override
+    public boolean isEnabled() {
+        return status == UserStatus.ACTIVE;
     }
 }

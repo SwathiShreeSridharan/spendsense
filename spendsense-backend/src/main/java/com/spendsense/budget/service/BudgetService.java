@@ -7,20 +7,16 @@ import com.spendsense.budget.entity.Budget;
 import com.spendsense.budget.entity.BudgetType;
 import com.spendsense.budget.repository.BudgetRepository;
 import com.spendsense.exception.*;
+import com.spendsense.expense.repository.ExpenseRepository;
 import com.spendsense.group.entity.Group;
-import com.spendsense.group.entity.GroupMember;
-import com.spendsense.group.entity.GroupRole;
-import com.spendsense.exception.GroupNotFoundException;
-import com.spendsense.group.repository.GroupMemberRepository;
-import com.spendsense.group.repository.GroupRepository;
+import com.spendsense.group.service.GroupAccessService;
+import com.spendsense.security.CurrentUserService;
 import com.spendsense.user.entity.User;
-import com.spendsense.user.repository.UserRepository;
 import jakarta.transaction.Transactional;
-import org.springframework.security.core.Authentication;
-import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Service;
 
 import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.time.LocalDate;
 import java.util.List;
 import java.util.UUID;
@@ -29,20 +25,20 @@ import java.util.UUID;
 public class BudgetService {
 
     private final BudgetRepository budgetRepository;
-    private final GroupRepository groupRepository;
-    private final GroupMemberRepository groupMemberRepository;
-    private final UserRepository userRepository;
+    private final CurrentUserService currentUserService;
+    private final GroupAccessService groupAccessService;
+    private final ExpenseRepository expenseRepository;
 
     public BudgetService(
             BudgetRepository budgetRepository,
-            GroupRepository groupRepository,
-            GroupMemberRepository groupMemberRepository,
-            UserRepository userRepository
+            CurrentUserService currentUserService,
+            GroupAccessService groupAccessService,
+            ExpenseRepository expenseRepository
     ) {
         this.budgetRepository = budgetRepository;
-        this.groupRepository = groupRepository;
-        this.groupMemberRepository = groupMemberRepository;
-        this.userRepository = userRepository;
+        this.currentUserService = currentUserService;
+        this.groupAccessService = groupAccessService;
+        this.expenseRepository = expenseRepository;
     }
 
     @Transactional
@@ -50,25 +46,14 @@ public class BudgetService {
             UUID groupId,
             CreateBudgetRequest request
     ) {
-        User currentUser = getCurrentUser();
+        User currentUser =
+                currentUserService.getCurrentUser();
 
-        Group group = groupRepository
-                .findByGroupIdAndArchivedFalse(groupId)
-                .orElseThrow(
-                        () -> new GroupNotFoundException("Group not found")
+        Group group =
+                groupAccessService.requireOwnerOrAdmin(
+                        groupId,
+                        currentUser
                 );
-
-        GroupMember membership = groupMemberRepository
-                .findByGroupAndUser(group, currentUser)
-                .orElseThrow(
-                        () -> new GroupNotFoundException("Group not found")
-                );
-
-        if (membership.getRole() != GroupRole.OWNER) {
-            throw new BudgetAccessDeniedException(
-                    "Only the group owner can create a budget"
-            );
-        }
 
         if (group.getSettings() == null
                 || !group.getSettings().isBudgetEnabled()) {
@@ -78,15 +63,11 @@ public class BudgetService {
             );
         }
 
-        if (request.getStartDate().isAfter(request.getEndDate())) {
-            throw new InvalidBudgetPeriodException(
-                    "Start date cannot be after end date"
-            );
-        }
-
-        validateBudgetPeriod(request.getBudgetType(),
+        validateBudgetPeriod(
+                request.getBudgetType(),
                 request.getStartDate(),
-                request.getEndDate());
+                request.getEndDate()
+        );
 
         boolean overlappingBudgetExists =
                 budgetRepository.existsOverlappingBudget(
@@ -117,32 +98,15 @@ public class BudgetService {
     }
 
     public List<BudgetResponse> getGroupBudgets(UUID groupId) {
+        User currentUser = currentUserService.getCurrentUser();
 
-        User currentUser = getCurrentUser();
+        Group group = groupAccessService.requireMember(
+                groupId,
+                currentUser
+        );
 
-        Group group = groupRepository
-                .findByGroupIdAndArchivedFalse(groupId)
-                .orElseThrow(
-                        () -> new GroupNotFoundException(
-                                "Group not found"
-                        )
-                );
-
-        groupMemberRepository
-                .findByGroupAndUser(group, currentUser)
-                .orElseThrow(
-                        () -> new GroupNotFoundException(
-                                "Group not found"
-                        )
-                );
-
-        List<Budget> budgets =
-                budgetRepository
-                        .findByGroupAndArchivedFalseOrderByStartDateDesc(
-                                group
-                        );
-
-        return budgets
+        return budgetRepository
+                .findByGroupAndArchivedFalseOrderByStartDateDesc(group)
                 .stream()
                 .map(this::mapToResponse)
                 .toList();
@@ -152,44 +116,23 @@ public class BudgetService {
             UUID groupId,
             UUID budgetId
     ) {
+        User currentUser = currentUserService.getCurrentUser();
 
-        User currentUser = getCurrentUser();
-
-        Group group = groupRepository
-                .findByGroupIdAndArchivedFalse(groupId)
-                .orElseThrow(
-                        () -> new GroupNotFoundException(
-                                "Group not found"
-                        )
-                );
-
-        groupMemberRepository
-                .findByGroupAndUser(
-                        group,
-                        currentUser
-                )
-                .orElseThrow(
-                        () -> new GroupNotFoundException(
-                                "Group not found"
-                        )
-                );
+        Group group = groupAccessService.requireMember(
+                groupId,
+                currentUser
+        );
 
         Budget budget = budgetRepository
-                .findByBudgetIdAndArchivedFalse(budgetId)
+                .findByBudgetIdAndGroupAndArchivedFalse(
+                        budgetId,
+                        group
+                )
                 .orElseThrow(
                         () -> new BudgetNotFoundException(
                                 "Budget not found"
                         )
                 );
-
-        if (!budget.getGroup()
-                .getGroupId()
-                .equals(groupId)) {
-
-            throw new BudgetNotFoundException(
-                    "Budget not found"
-            );
-        }
 
         return mapToResponse(budget);
     }
@@ -200,52 +143,29 @@ public class BudgetService {
             UUID budgetId,
             UpdateBudgetRequest request
     ) {
+        User currentUser = currentUserService.getCurrentUser();
 
-        User currentUser = getCurrentUser();
-
-        Group group = groupRepository
-                .findByGroupIdAndArchivedFalse(groupId)
-                .orElseThrow(
-                        () -> new GroupNotFoundException(
-                                "Group not found"
-                        )
-                );
-
-        GroupMember membership = groupMemberRepository
-                .findByGroupAndUser(
-                        group,
-                        currentUser
-                )
-                .orElseThrow(
-                        () -> new GroupNotFoundException(
-                                "Group not found"
-                        )
-                );
-
-        if (membership.getRole() != GroupRole.OWNER) {
-            throw new BudgetAccessDeniedException(
-                    "Only the group owner can update a budget"
-            );
-        }
+        Group group = groupAccessService.requireOwnerOrAdmin(
+                groupId,
+                currentUser
+        );
 
         Budget budget = budgetRepository
-                .findByBudgetIdAndArchivedFalse(budgetId)
+                .findByBudgetIdAndGroupAndArchivedFalse(
+                        budgetId,
+                        group
+                )
                 .orElseThrow(
                         () -> new BudgetNotFoundException(
                                 "Budget not found"
                         )
                 );
 
-        if (!budget.getGroup()
-                .getGroupId()
-                .equals(groupId)) {
-
-            throw new BudgetNotFoundException(
-                    "Budget not found"
-            );
-        }
-
-        validateBudgetPeriod(request.getBudgetType(),request.getStartDate(),request.getEndDate());
+        validateBudgetPeriod(
+                request.getBudgetType(),
+                request.getStartDate(),
+                request.getEndDate()
+        );
 
         boolean overlapExists =
                 budgetRepository
@@ -267,8 +187,7 @@ public class BudgetService {
         budget.setStartDate(request.getStartDate());
         budget.setEndDate(request.getEndDate());
 
-        Budget updatedBudget =
-                budgetRepository.save(budget);
+        Budget updatedBudget = budgetRepository.save(budget);
 
         return mapToResponse(updatedBudget);
     }
@@ -278,71 +197,29 @@ public class BudgetService {
             UUID groupId,
             UUID budgetId
     ) {
+        User currentUser = currentUserService.getCurrentUser();
 
-        User currentUser = getCurrentUser();
-
-        Group group = groupRepository
-                .findByGroupIdAndArchivedFalse(groupId)
-                .orElseThrow(
-                        () -> new GroupNotFoundException(
-                                "Group not found"
-                        )
-                );
-
-        GroupMember membership = groupMemberRepository
-                .findByGroupAndUser(
-                        group,
-                        currentUser
-                )
-                .orElseThrow(
-                        () -> new GroupNotFoundException(
-                                "Group not found"
-                        )
-                );
-
-        if (membership.getRole() != GroupRole.OWNER) {
-            throw new BudgetAccessDeniedException(
-                    "Only the group owner can archive a budget"
-            );
-        }
+        Group group = groupAccessService.requireOwnerOrAdmin(
+                groupId,
+                currentUser
+        );
 
         Budget budget = budgetRepository
-                .findByBudgetIdAndArchivedFalse(budgetId)
+                .findByBudgetIdAndGroupAndArchivedFalse(
+                        budgetId,
+                        group
+                )
                 .orElseThrow(
                         () -> new BudgetNotFoundException(
                                 "Budget not found"
                         )
                 );
 
-        if (!budget.getGroup()
-                .getGroupId()
-                .equals(groupId)) {
-
-            throw new BudgetNotFoundException(
-                    "Budget not found"
-            );
-        }
-
         budget.setArchived(true);
 
         budgetRepository.save(budget);
     }
 
-    private User getCurrentUser() {
-
-        Authentication authentication =
-                SecurityContextHolder
-                        .getContext()
-                        .getAuthentication();
-
-        String email = authentication.getName();
-
-        return userRepository
-                .findByEmail(email)
-                .orElseThrow(
-                        () -> new RuntimeException("User not found")
-                );
-    }
 
     private void validateBudgetPeriod(
             BudgetType budgetType,
@@ -458,12 +335,28 @@ public class BudgetService {
 
     private BudgetResponse mapToResponse(Budget budget) {
 
-        BigDecimal spentAmount = BigDecimal.ZERO;
+        BigDecimal spentAmount =
+                expenseRepository.getTotalExpenseForBudgetPeriod(
+                        budget.getGroup(),
+                        budget.getStartDate(),
+                        budget.getEndDate()
+                );
+
+        if (spentAmount == null) {
+            spentAmount = BigDecimal.ZERO;
+        }
 
         BigDecimal remainingAmount =
                 budget.getAmount().subtract(spentAmount);
 
-        BigDecimal percentageUsed = BigDecimal.ZERO;
+        BigDecimal percentageUsed =
+                spentAmount
+                        .multiply(BigDecimal.valueOf(100))
+                        .divide(
+                                budget.getAmount(),
+                                2,
+                                RoundingMode.HALF_UP
+                        );
 
         boolean exceeded =
                 spentAmount.compareTo(budget.getAmount()) > 0;
@@ -484,5 +377,16 @@ public class BudgetService {
                 budget.getCreatedBy().getName(),
                 budget.getCreatedAt()
         );
+    }
+
+    public List<BudgetResponse> getActiveBudgetsForUser(
+            User user,
+            LocalDate date
+    ) {
+        return budgetRepository
+                .findActiveBudgetsForUser(user, date)
+                .stream()
+                .map(this::mapToResponse)
+                .toList();
     }
 }

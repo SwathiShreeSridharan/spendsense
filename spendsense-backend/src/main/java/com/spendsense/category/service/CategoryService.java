@@ -5,35 +5,47 @@ import com.spendsense.category.dto.CreateCategoryRequest;
 import com.spendsense.category.entity.Category;
 import com.spendsense.category.repository.CategoryRepository;
 import com.spendsense.exception.DuplicateCategoryException;
+import com.spendsense.exception.GroupNotFoundException;
+import com.spendsense.group.entity.Group;
+import com.spendsense.group.entity.GroupMember;
+import com.spendsense.group.repository.GroupMemberRepository;
+import com.spendsense.group.repository.GroupRepository;
+import com.spendsense.group.service.GroupAccessService;
+import com.spendsense.security.CurrentUserService;
 import com.spendsense.user.entity.User;
-import com.spendsense.user.repository.UserRepository;
-import org.springframework.security.core.Authentication;
-import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Service;
 
-import java.util.ArrayList;
 import java.util.List;
+import java.util.UUID;
 
 @Service
 public class CategoryService {
 
     private final CategoryRepository categoryRepository;
-    private final UserRepository userRepository;
+    private final CurrentUserService currentUserService;
+    private final GroupAccessService groupAccessService;
 
-    public CategoryService(CategoryRepository categoryRepository, UserRepository userRepository) {
+    public CategoryService(CategoryRepository categoryRepository, CurrentUserService currentUserService, GroupAccessService groupAccessService) {
         this.categoryRepository = categoryRepository;
-        this.userRepository = userRepository;
+        this.currentUserService = currentUserService;
+        this.groupAccessService = groupAccessService;
     }
 
-    public CategoryResponse createCategory(CreateCategoryRequest request) {
-        User currentUser = getCurrentUser();
+    public CategoryResponse createCategory(UUID groupId, CreateCategoryRequest request) {
+        User currentUser = currentUserService.getCurrentUser();
+
+        Group group =
+                groupAccessService.requireMember(
+                        groupId,
+                        currentUser
+                );
 
         String categoryName = request.getName().trim();
 
         boolean exists = categoryRepository
-                .existsByNameAndCreatedBy(
+                .existsByNameIgnoreCaseAndGroup(
                         categoryName,
-                        currentUser
+                        group
                 );
 
         if(exists){
@@ -53,10 +65,11 @@ public class CategoryService {
         }
 
         Category category = new Category(
-                request.getName(),
+                categoryName,
                 icon,
                 color,
                 false,
+                group,
                 currentUser
         );
 
@@ -66,45 +79,21 @@ public class CategoryService {
     }
 
 
-    public List<CategoryResponse> getCategories(){
+    public List<CategoryResponse> getCategories(UUID groupId){
 
-        User currentUser = getCurrentUser();
+        User currentUser = currentUserService.getCurrentUser();
 
-        List<Category> defaultCategories =
-                categoryRepository.findByIsDefaultTrue();
+        Group group =
+                groupAccessService.requireMember(
+                        groupId,
+                        currentUser
+                );
 
-
-        List<Category> userCategories =
-                categoryRepository.findByCreatedBy(currentUser);
-
-
-        List<Category> allCategories = new ArrayList<>();
-
-        allCategories.addAll(defaultCategories);
-        allCategories.addAll(userCategories);
-
-
-        return allCategories
+        return categoryRepository
+                .findByGroupOrderByNameAsc(group)
                 .stream()
                 .map(this::mapToResponse)
                 .toList();
-    }
-
-    private User getCurrentUser(){
-
-        Authentication authentication =
-                SecurityContextHolder
-                        .getContext()
-                        .getAuthentication();
-
-
-        String email = authentication.getName();
-
-        return userRepository
-                .findByEmail(email)
-                .orElseThrow(
-                        () -> new RuntimeException("User not found")
-                );
     }
 
     private CategoryResponse mapToResponse(Category category){

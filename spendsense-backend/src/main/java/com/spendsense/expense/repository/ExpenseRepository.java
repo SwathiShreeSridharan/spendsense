@@ -3,12 +3,12 @@ package com.spendsense.expense.repository;
 import com.spendsense.dashboard.dto.CategorySummaryResponse;
 import com.spendsense.dashboard.projection.MonthlyExpenseProjection;
 import com.spendsense.expense.entity.Expense;
+import com.spendsense.group.entity.Group;
 import com.spendsense.user.entity.User;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
-import tools.jackson.databind.ser.impl.UnknownSerializer;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
@@ -18,7 +18,9 @@ import java.util.UUID;
 @Repository
 public interface ExpenseRepository extends JpaRepository<Expense, UUID> {
 
-    List<Expense> findByCreatedBy(User createdBy);
+    List<Expense> findByGroupOrderByExpenseDateDescCreatedAtDesc(
+            Group group
+    );
 
     long countByCreatedBy(User createdBy);
 
@@ -85,5 +87,17 @@ public interface ExpenseRepository extends JpaRepository<Expense, UUID> {
     List<MonthlyExpenseProjection> getMonthlyExpenseSummary(
             @Param("userId") UUID userId,
             @Param("year") int year
+    );
+
+    @Query("""
+        SELECT COALESCE(SUM(e.amount), 0)
+        FROM Expense e
+        WHERE e.group = :group
+          AND e.expenseDate BETWEEN :startDate AND :endDate
+        """)
+    BigDecimal getTotalExpenseForBudgetPeriod(
+            @Param("group") Group group,
+            @Param("startDate") LocalDate startDate,
+            @Param("endDate") LocalDate endDate
     );
 }

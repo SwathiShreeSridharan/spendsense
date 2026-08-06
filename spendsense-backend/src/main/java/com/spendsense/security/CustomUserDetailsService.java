@@ -1,5 +1,6 @@
 package com.spendsense.security;
 
+import com.spendsense.user.entity.UserStatus;
 import com.spendsense.user.repository.UserRepository;
 import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.security.core.userdetails.UserDetailsService;
@@ -7,18 +8,30 @@ import org.springframework.security.core.userdetails.UsernameNotFoundException;
 import org.springframework.stereotype.Service;
 
 @Service
-public class CustomUserDetailsService implements UserDetailsService {
+public class CustomUserDetailsService
+        implements UserDetailsService {
 
-    UserRepository userRepository;
+    private final UserRepository userRepository;
 
-    public CustomUserDetailsService(UserRepository userRepository){
+    public CustomUserDetailsService(
+            UserRepository userRepository
+    ) {
         this.userRepository = userRepository;
     }
 
     @Override
-    public UserDetails loadUserByUsername(String username) throws UsernameNotFoundException {
-        return userRepository.findByEmail(username)
-                .orElseThrow(() ->
-                        new UsernameNotFoundException("User not found"));
+    public UserDetails loadUserByUsername(String email)
+            throws UsernameNotFoundException {
+
+        return userRepository
+                .findByEmailAndStatus(
+                        email,
+                        UserStatus.ACTIVE
+                )
+                .orElseThrow(
+                        () -> new UsernameNotFoundException(
+                                "User not found"
+                        )
+                );
     }
 }

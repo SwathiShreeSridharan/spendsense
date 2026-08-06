@@ -1,5 +1,6 @@
 package com.spendsense.category.entity;
 
+import com.spendsense.group.entity.Group;
 import com.spendsense.user.entity.User;
 import jakarta.persistence.*;
 
@@ -27,6 +28,10 @@ public class Category {
     private boolean isDefault;
 
     @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "group_id")
+    private Group group;
+
+    @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "created_by")
     private User createdBy;
 
@@ -45,12 +50,14 @@ public class Category {
             String icon,
             String color,
             boolean isDefault,
+            Group group,
             User createdBy
     ) {
         this.name = name;
         this.icon = icon;
         this.color = color;
         this.isDefault = isDefault;
+        this.group = group;
         this.createdBy = createdBy;
     }
 
@@ -130,4 +137,8 @@ public class Category {
     public void setUpdatedAt(LocalDateTime updatedAt) {
         this.updatedAt = updatedAt;
     }
+
+    public Group getGroup() { return group; }
+
+    public void setGroup(Group group) { this.group = group; }
 }

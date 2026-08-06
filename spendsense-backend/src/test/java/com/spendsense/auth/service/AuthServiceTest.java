@@ -2,37 +2,42 @@ package com.spendsense.auth.service;
 
 import com.spendsense.auth.dto.LoginRequest;
 import com.spendsense.auth.dto.LoginResponse;
+import com.spendsense.security.JwtService;
 import com.spendsense.user.exception.InvalidCredentialsException;
 import com.spendsense.user.entity.User;
-import com.spendsense.user.repository.UserRepository;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
-import org.springframework.security.crypto.password.PasswordEncoder;
-
-import java.util.Optional;
+import org.springframework.security.authentication.AuthenticationManager;
+import org.springframework.security.authentication.BadCredentialsException;
+import org.springframework.security.core.Authentication;
+import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
 
 @ExtendWith(MockitoExtension.class)
 public class AuthServiceTest {
+    @Mock
+    private AuthenticationManager authenticationManager;
 
     @Mock
-    private UserRepository userRepository;
+    private JwtService jwtService;
 
     @Mock
-    private PasswordEncoder passwordEncoder;
+    private Authentication authentication;
 
     @InjectMocks
     private AuthService authService;
 
     @Test
-    void shouldLoginSuccessfully(){
+    void shouldLoginSuccessfully() {
+
         LoginRequest request = new LoginRequest(
-                "swa@gmail.com","MyPassword123"
+                "swa@gmail.com",
+                "MyPassword123"
         );
 
         User user = new User(
@@ -42,24 +47,30 @@ public class AuthServiceTest {
                 "$2a$10$hashedPassword"
         );
 
-        when(userRepository.findByEmail("swa@gmail.com")).thenReturn(Optional.of(user));
+        user.setUserId(UUID.randomUUID());
 
-        when(passwordEncoder.matches("MyPassword123","$2a$10$hashedPassword")).thenReturn(true);
+        when(authenticationManager.authenticate(any()))
+                .thenReturn(authentication);
 
-        LoginResponse response = authService.login(request);
+        when(authentication.getPrincipal())
+                .thenReturn(user);
+
+        when(jwtService.generateToken(user))
+                .thenReturn("jwt-token");
+
+        LoginResponse response =
+                authService.login(request);
 
         assertNotNull(response);
+        assertEquals("Swathi", response.getName());
+        assertEquals("swa@gmail.com", response.getEmail());
+        assertEquals("jwt-token", response.getToken());
 
-        assertEquals("Swathi",response.getName());
-        assertEquals("swa@gmail.com",response.getEmail());
+        verify(authenticationManager)
+                .authenticate(any());
 
-        verify(userRepository)
-                .findByEmail("swa@gmail.com");
-
-        verify(passwordEncoder)
-                .matches(
-                        "MyPassword123",
-                        "$2a$10$hashedPassword");
+        verify(jwtService)
+                .generateToken(user);
     }
 
     @Test
@@ -68,17 +79,36 @@ public class AuthServiceTest {
                 "unknown@gmail.com","MyPassword123"
         );
 
-        when(userRepository.findByEmail("unknown@gmail.com")).thenReturn(Optional.empty());
+        User user = new User(
+                "Swathi",
+                "swa@gmail.com",
+                "1234567890",
+                "$2a$10$hashedPassword");
 
-        assertThrows(
-                InvalidCredentialsException.class,
-                () -> authService.login(request)
-        );
+        user.setUserId(UUID.randomUUID());
 
-        verify(userRepository).findByEmail("unknown@gmail.com");
+        when(authenticationManager.authenticate(any()))
+                .thenReturn(authentication);
 
-        verify(passwordEncoder, never())
-                .matches(anyString(),anyString());
+        when(authentication.getPrincipal())
+                .thenReturn(user);
+
+        when(jwtService.generateToken(user))
+                .thenReturn("jwt-token");
+
+        LoginResponse response =
+                authService.login(request);
+
+        assertNotNull(response);
+        assertEquals("Swathi", response.getName());
+        assertEquals("swa@gmail.com", response.getEmail());
+        assertEquals("jwt-token", response.getToken());
+
+        verify(authenticationManager)
+                .authenticate(any());
+
+        verify(jwtService)
+                .generateToken(user);
 
     }
 
@@ -96,29 +126,20 @@ public class AuthServiceTest {
                 "$2a$10$hashedPassword"
         );
 
-        when(userRepository.findByEmail("swa@gmail.com"))
-                .thenReturn(Optional.of(user));
-
-        when(passwordEncoder.matches(
-                "WrongPassword",
-                "$2a$10$hashedPassword"
-        )).thenReturn(false);
-
+        when(authenticationManager.authenticate(any()))
+                .thenThrow(
+                        new BadCredentialsException(
+                                "Bad credentials"
+                        )
+                );
 
         assertThrows(
                 InvalidCredentialsException.class,
                 () -> authService.login(request)
         );
 
-
-        verify(userRepository)
-                .findByEmail("swa@gmail.com");
-
-        verify(passwordEncoder)
-                .matches(
-                        "WrongPassword",
-                        "$2a$10$hashedPassword"
-                );
+        verify(jwtService, never())
+                .generateToken(any());
     }
 }
 

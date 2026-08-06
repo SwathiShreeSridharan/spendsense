@@ -6,12 +6,8 @@ import com.spendsense.budget.dto.UpdateBudgetRequest;
 import com.spendsense.budget.entity.Budget;
 import com.spendsense.budget.entity.BudgetType;
 import com.spendsense.budget.repository.BudgetRepository;
-import com.spendsense.exception.BudgetAccessDeniedException;
-import com.spendsense.exception.BudgetAlreadyExistsException;
-import com.spendsense.exception.BudgetNotEnabledException;
-import com.spendsense.exception.BudgetNotFoundException;
-import com.spendsense.exception.GroupNotFoundException;
-import com.spendsense.exception.InvalidBudgetPeriodException;
+import com.spendsense.exception.*;
+import com.spendsense.expense.repository.ExpenseRepository;
 import com.spendsense.group.entity.Group;
 import com.spendsense.group.entity.GroupMember;
 import com.spendsense.group.entity.GroupRole;
@@ -19,18 +15,15 @@ import com.spendsense.group.entity.GroupSettings;
 import com.spendsense.group.entity.GroupType;
 import com.spendsense.group.repository.GroupMemberRepository;
 import com.spendsense.group.repository.GroupRepository;
+import com.spendsense.group.service.GroupAccessService;
+import com.spendsense.security.CurrentUserService;
 import com.spendsense.user.entity.User;
-import com.spendsense.user.repository.UserRepository;
-import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
-import org.mockito.ArgumentCaptor;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
-import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
-import org.springframework.security.core.context.SecurityContextHolder;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
@@ -49,20 +42,19 @@ class BudgetServiceTest {
     private BudgetRepository budgetRepository;
 
     @Mock
-    private GroupRepository groupRepository;
+    private CurrentUserService currentUserService;
 
     @Mock
-    private GroupMemberRepository groupMemberRepository;
+    private GroupAccessService groupAccessService;
 
     @Mock
-    private UserRepository userRepository;
+    private ExpenseRepository expenseRepository;
 
     @InjectMocks
     private BudgetService budgetService;
 
     private User currentUser;
     private Group group;
-    private GroupMember ownerMembership;
 
     @BeforeEach
     void setUp() {
@@ -88,47 +80,18 @@ class BudgetServiceTest {
         group.setCreatedBy(currentUser);
         group.setSettings(settings);
 
-        ownerMembership = new GroupMember();
-        ownerMembership.setMemberId(UUID.randomUUID());
-        ownerMembership.setGroup(group);
-        ownerMembership.setUser(currentUser);
-        ownerMembership.setRole(GroupRole.OWNER);
-
-        SecurityContextHolder
-                .getContext()
-                .setAuthentication(
-                        new UsernamePasswordAuthenticationToken(
-                                "swathi@gmail.com",
-                                null
-                        )
-                );
     }
 
-    @AfterEach
-    void tearDown() {
-        SecurityContextHolder.clearContext();
-    }
 
     @Test
     void shouldCreateMonthlyBudgetSuccessfully() {
+        mockCurrentUserAndBudgetManager();
 
-        CreateBudgetRequest request =
-                new CreateBudgetRequest(
-                        BigDecimal.valueOf(30000),
-                        BudgetType.MONTHLY,
-                        LocalDate.of(2026, 8, 1),
-                        LocalDate.of(2026, 8, 31)
-                );
-
-        mockCurrentUser();
-
-        when(groupRepository
-                .findByGroupIdAndArchivedFalse(group.getGroupId()))
-                .thenReturn(Optional.of(group));
-
-        when(groupMemberRepository
-                .findByGroupAndUser(group, currentUser))
-                .thenReturn(Optional.of(ownerMembership));
+        CreateBudgetRequest request = new CreateBudgetRequest();
+        request.setAmount(new BigDecimal("5000.00"));
+        request.setBudgetType(BudgetType.MONTHLY);
+        request.setStartDate(LocalDate.of(2026, 8, 1));
+        request.setEndDate(LocalDate.of(2026, 8, 31));
 
         when(budgetRepository.existsOverlappingBudget(
                 group,
@@ -137,189 +100,93 @@ class BudgetServiceTest {
         )).thenReturn(false);
 
         when(budgetRepository.save(any(Budget.class)))
-                .thenAnswer(invocation -> {
-                    Budget budget = invocation.getArgument(0);
-                    budget.setBudgetId(UUID.randomUUID());
-                    return budget;
-                });
+                .thenAnswer(invocation -> invocation.getArgument(0));
 
-        BudgetResponse response =
-                budgetService.createBudget(
-                        group.getGroupId(),
-                        request
-                );
+        BudgetResponse response = budgetService.createBudget(
+                group.getGroupId(),
+                request
+        );
 
         assertNotNull(response);
-        assertNotNull(response.getBudgetId());
+        assertEquals(request.getAmount(), response.getBudgetAmount());
+        assertEquals(request.getBudgetType(), response.getBudgetType());
+        assertEquals(request.getStartDate(), response.getStartDate());
+        assertEquals(request.getEndDate(), response.getEndDate());
 
-        assertEquals(
-                BigDecimal.valueOf(30000),
-                response.getBudgetAmount()
+        verify(currentUserService).getCurrentUser();
+
+        verify(groupAccessService).requireOwnerOrAdmin(
+                group.getGroupId(),
+                currentUser
         );
 
-        assertEquals(
-                BudgetType.MONTHLY,
-                response.getBudgetType()
+        verify(budgetRepository).existsOverlappingBudget(
+                group,
+                request.getStartDate(),
+                request.getEndDate()
         );
 
-        assertEquals(
-                LocalDate.of(2026, 8, 1),
-                response.getStartDate()
-        );
-
-        assertEquals(
-                LocalDate.of(2026, 8, 31),
-                response.getEndDate()
-        );
-
-        assertEquals(
-                BigDecimal.ZERO,
-                response.getSpentAmount()
-        );
-
-        assertEquals(
-                BigDecimal.valueOf(30000),
-                response.getRemainingAmount()
-        );
-
-        assertFalse(response.isExceeded());
-
-        ArgumentCaptor<Budget> budgetCaptor =
-                ArgumentCaptor.forClass(Budget.class);
-
-        verify(budgetRepository)
-                .save(budgetCaptor.capture());
-
-        Budget savedBudget = budgetCaptor.getValue();
-
-        assertEquals(group, savedBudget.getGroup());
-        assertEquals(currentUser, savedBudget.getCreatedBy());
-
-        assertEquals(
-                BigDecimal.valueOf(30000),
-                savedBudget.getAmount()
-        );
-
-        assertEquals(
-                BudgetType.MONTHLY,
-                savedBudget.getBudgetType()
-        );
-
-        assertFalse(savedBudget.isArchived());
+        verify(budgetRepository).save(any(Budget.class));
     }
 
     @Test
     void shouldThrowGroupNotFoundWhenCreatingBudgetForMissingGroup() {
-
-        UUID groupId = UUID.randomUUID();
-
-        CreateBudgetRequest request =
-                createMonthlyRequest();
-
         mockCurrentUser();
 
-        when(groupRepository
-                .findByGroupIdAndArchivedFalse(groupId))
-                .thenReturn(Optional.empty());
+        CreateBudgetRequest request = new CreateBudgetRequest();
+        request.setAmount(new BigDecimal("5000.00"));
+        request.setBudgetType(BudgetType.MONTHLY);
+        request.setStartDate(LocalDate.of(2026, 8, 1));
+        request.setEndDate(LocalDate.of(2026, 8, 31));
+
+        when(groupAccessService.requireOwnerOrAdmin(
+                group.getGroupId(),
+                currentUser
+        )).thenThrow(new GroupNotFoundException("Group not found"));
 
         assertThrows(
                 GroupNotFoundException.class,
-                () -> budgetService.createBudget(
-                        groupId,
-                        request
-                )
+                () -> budgetService.createBudget(group.getGroupId(), request)
         );
 
-        verify(groupMemberRepository, never())
-                .findByGroupAndUser(any(), any());
-
-        verify(budgetRepository, never())
-                .save(any());
+        verify(budgetRepository, never()).save(any(Budget.class));
     }
 
-    @Test
-    void shouldThrowGroupNotFoundWhenUserIsNotMember() {
-
-        CreateBudgetRequest request =
-                createMonthlyRequest();
-
-        mockCurrentUser();
-
-        when(groupRepository
-                .findByGroupIdAndArchivedFalse(group.getGroupId()))
-                .thenReturn(Optional.of(group));
-
-        when(groupMemberRepository
-                .findByGroupAndUser(group, currentUser))
-                .thenReturn(Optional.empty());
-
-        assertThrows(
-                GroupNotFoundException.class,
-                () -> budgetService.createBudget(
-                        group.getGroupId(),
-                        request
-                )
-        );
-
-        verify(budgetRepository, never())
-                .save(any());
-    }
 
     @Test
     void shouldThrowAccessDeniedWhenMemberCreatesBudget() {
-
-        GroupMember memberMembership =
-                createMembership(GroupRole.MEMBER);
-
-        CreateBudgetRequest request =
-                createMonthlyRequest();
-
         mockCurrentUser();
 
-        when(groupRepository
-                .findByGroupIdAndArchivedFalse(group.getGroupId()))
-                .thenReturn(Optional.of(group));
+        CreateBudgetRequest request = new CreateBudgetRequest();
+        request.setAmount(new BigDecimal("5000.00"));
+        request.setBudgetType(BudgetType.MONTHLY);
+        request.setStartDate(LocalDate.of(2026, 8, 1));
+        request.setEndDate(LocalDate.of(2026, 8, 31));
 
-        when(groupMemberRepository
-                .findByGroupAndUser(group, currentUser))
-                .thenReturn(Optional.of(memberMembership));
-
-        assertThrows(
-                BudgetAccessDeniedException.class,
-                () -> budgetService.createBudget(
-                        group.getGroupId(),
-                        request
+        when(groupAccessService.requireOwnerOrAdmin(
+                group.getGroupId(),
+                currentUser
+        )).thenThrow(
+                new GroupAccessDeniedException(
+                        "Only the group owner or an admin can perform this action"
                 )
         );
 
-        verify(budgetRepository, never())
-                .existsOverlappingBudget(
-                        any(),
-                        any(),
-                        any()
-                );
+        assertThrows(
+                GroupAccessDeniedException.class,
+                () -> budgetService.createBudget(group.getGroupId(), request)
+        );
 
-        verify(budgetRepository, never())
-                .save(any());
+        verify(budgetRepository, never()).save(any(Budget.class));
     }
 
     @Test
     void shouldThrowBudgetNotEnabledException() {
-
         group.getSettings().setBudgetEnabled(false);
 
-        CreateBudgetRequest request =
-                createMonthlyRequest();
+        CreateBudgetRequest request = createMonthlyRequest();
 
-        mockCurrentUser();
-
-        when(groupRepository
-                .findByGroupIdAndArchivedFalse(group.getGroupId()))
-                .thenReturn(Optional.of(group));
-
-        when(groupMemberRepository
-                .findByGroupAndUser(group, currentUser))
-                .thenReturn(Optional.of(ownerMembership));
+        mockCurrentUserAndBudgetManager();
 
         assertThrows(
                 BudgetNotEnabledException.class,
@@ -329,8 +196,19 @@ class BudgetServiceTest {
                 )
         );
 
+        verify(groupAccessService).requireOwnerOrAdmin(
+                group.getGroupId(),
+                currentUser
+        );
+
         verify(budgetRepository, never())
-                .save(any());
+                .existsOverlappingBudget(
+                        any(),
+                        any(),
+                        any()
+                );
+
+        verify(budgetRepository, never()).save(any());
     }
 
     @Test
@@ -344,7 +222,7 @@ class BudgetServiceTest {
                         LocalDate.of(2026, 8, 1)
                 );
 
-        mockCurrentUserAndOwner();
+        mockCurrentUserAndBudgetManager();
 
         assertThrows(
                 InvalidBudgetPeriodException.class,
@@ -373,7 +251,7 @@ class BudgetServiceTest {
                         LocalDate.of(2026, 8, 31)
                 );
 
-        mockCurrentUserAndOwner();
+        mockCurrentUserAndBudgetManager();
 
         assertThrows(
                 InvalidBudgetPeriodException.class,
@@ -395,7 +273,7 @@ class BudgetServiceTest {
                         LocalDate.of(2026, 4, 30)
                 );
 
-        mockCurrentUserAndOwner();
+        mockCurrentUserAndBudgetManager();
 
         assertThrows(
                 InvalidBudgetPeriodException.class,
@@ -417,7 +295,7 @@ class BudgetServiceTest {
                         LocalDate.of(2026, 9, 30)
                 );
 
-        mockCurrentUserAndOwner();
+        mockCurrentUserAndBudgetManager();
 
         when(budgetRepository.existsOverlappingBudget(
                 group,
@@ -465,7 +343,7 @@ class BudgetServiceTest {
                         LocalDate.of(2026, 12, 31)
                 );
 
-        mockCurrentUserAndOwner();
+        mockCurrentUserAndBudgetManager();
 
         assertThrows(
                 InvalidBudgetPeriodException.class,
@@ -482,7 +360,7 @@ class BudgetServiceTest {
         CreateBudgetRequest request =
                 createMonthlyRequest();
 
-        mockCurrentUserAndOwner();
+        mockCurrentUserAndBudgetManager();
 
         when(budgetRepository.existsOverlappingBudget(
                 group,
@@ -504,7 +382,6 @@ class BudgetServiceTest {
 
     @Test
     void shouldReturnAllGroupBudgets() {
-
         Budget augustBudget =
                 createBudget(
                         BudgetType.MONTHLY,
@@ -521,29 +398,14 @@ class BudgetServiceTest {
                         LocalDate.of(2026, 7, 31)
                 );
 
-        mockCurrentUser();
-
-        when(groupRepository
-                .findByGroupIdAndArchivedFalse(group.getGroupId()))
-                .thenReturn(Optional.of(group));
-
-        when(groupMemberRepository
-                .findByGroupAndUser(group, currentUser))
-                .thenReturn(Optional.of(ownerMembership));
+        mockCurrentUserAndGroupMember();
 
         when(budgetRepository
                 .findByGroupAndArchivedFalseOrderByStartDateDesc(group))
-                .thenReturn(
-                        List.of(
-                                augustBudget,
-                                julyBudget
-                        )
-                );
+                .thenReturn(List.of(augustBudget, julyBudget));
 
         List<BudgetResponse> responses =
-                budgetService.getGroupBudgets(
-                        group.getGroupId()
-                );
+                budgetService.getGroupBudgets(group.getGroupId());
 
         assertEquals(2, responses.size());
 
@@ -556,11 +418,18 @@ class BudgetServiceTest {
                 LocalDate.of(2026, 7, 1),
                 responses.get(1).getStartDate()
         );
+
+        verify(groupAccessService).requireMember(
+                group.getGroupId(),
+                currentUser
+        );
+
+        verify(budgetRepository)
+                .findByGroupAndArchivedFalseOrderByStartDateDesc(group);
     }
 
     @Test
     void shouldReturnBudgetById() {
-
         Budget budget =
                 createBudget(
                         BudgetType.MONTHLY,
@@ -569,18 +438,13 @@ class BudgetServiceTest {
                         LocalDate.of(2026, 8, 31)
                 );
 
-        mockCurrentUser();
-
-        when(groupRepository
-                .findByGroupIdAndArchivedFalse(group.getGroupId()))
-                .thenReturn(Optional.of(group));
-
-        when(groupMemberRepository
-                .findByGroupAndUser(group, currentUser))
-                .thenReturn(Optional.of(ownerMembership));
+        mockCurrentUserAndGroupMember();
 
         when(budgetRepository
-                .findByBudgetIdAndArchivedFalse(budget.getBudgetId()))
+                .findByBudgetIdAndGroupAndArchivedFalse(
+                        budget.getBudgetId(),
+                        group
+                ))
                 .thenReturn(Optional.of(budget));
 
         BudgetResponse response =
@@ -598,49 +462,42 @@ class BudgetServiceTest {
                 group.getGroupId(),
                 response.getGroupId()
         );
+
+        verify(groupAccessService).requireMember(
+                group.getGroupId(),
+                currentUser
+        );
     }
 
     @Test
     void shouldThrowWhenBudgetDoesNotBelongToGroup() {
+        UUID budgetId = UUID.randomUUID();
 
-        Group anotherGroup = createAnotherGroup();
-
-        Budget budget =
-                createBudget(
-                        BudgetType.MONTHLY,
-                        BigDecimal.valueOf(30000),
-                        LocalDate.of(2026, 8, 1),
-                        LocalDate.of(2026, 8, 31)
-                );
-
-        budget.setGroup(anotherGroup);
-
-        mockCurrentUser();
-
-        when(groupRepository
-                .findByGroupIdAndArchivedFalse(group.getGroupId()))
-                .thenReturn(Optional.of(group));
-
-        when(groupMemberRepository
-                .findByGroupAndUser(group, currentUser))
-                .thenReturn(Optional.of(ownerMembership));
+        mockCurrentUserAndGroupMember();
 
         when(budgetRepository
-                .findByBudgetIdAndArchivedFalse(budget.getBudgetId()))
-                .thenReturn(Optional.of(budget));
+                .findByBudgetIdAndGroupAndArchivedFalse(
+                        budgetId,
+                        group
+                ))
+                .thenReturn(Optional.empty());
 
         assertThrows(
                 BudgetNotFoundException.class,
                 () -> budgetService.getBudgetById(
                         group.getGroupId(),
-                        budget.getBudgetId()
+                        budgetId
                 )
+        );
+
+        verify(groupAccessService).requireMember(
+                group.getGroupId(),
+                currentUser
         );
     }
 
     @Test
     void shouldUpdateBudgetSuccessfully() {
-
         Budget budget =
                 createBudget(
                         BudgetType.MONTHLY,
@@ -657,10 +514,13 @@ class BudgetServiceTest {
                         LocalDate.of(2026, 8, 31)
                 );
 
-        mockCurrentUserAndOwner();
+        mockCurrentUserAndBudgetManager();
 
         when(budgetRepository
-                .findByBudgetIdAndArchivedFalse(budget.getBudgetId()))
+                .findByBudgetIdAndGroupAndArchivedFalse(
+                        budget.getBudgetId(),
+                        group
+                ))
                 .thenReturn(Optional.of(budget));
 
         when(budgetRepository
@@ -687,23 +547,22 @@ class BudgetServiceTest {
                 response.getBudgetAmount()
         );
 
-        verify(budgetRepository)
-                .save(budget);
+        assertEquals(
+                request.getBudgetType(),
+                response.getBudgetType()
+        );
+
+        verify(groupAccessService).requireOwnerOrAdmin(
+                group.getGroupId(),
+                currentUser
+        );
+
+        verify(budgetRepository).save(budget);
     }
 
     @Test
     void shouldThrowWhenMemberUpdatesBudget() {
-
-        Budget budget =
-                createBudget(
-                        BudgetType.MONTHLY,
-                        BigDecimal.valueOf(30000),
-                        LocalDate.of(2026, 8, 1),
-                        LocalDate.of(2026, 8, 31)
-                );
-
-        GroupMember memberMembership =
-                createMembership(GroupRole.MEMBER);
+        UUID budgetId = UUID.randomUUID();
 
         UpdateBudgetRequest request =
                 new UpdateBudgetRequest(
@@ -715,30 +574,35 @@ class BudgetServiceTest {
 
         mockCurrentUser();
 
-        when(groupRepository
-                .findByGroupIdAndArchivedFalse(group.getGroupId()))
-                .thenReturn(Optional.of(group));
-
-        when(groupMemberRepository
-                .findByGroupAndUser(group, currentUser))
-                .thenReturn(Optional.of(memberMembership));
+        when(groupAccessService.requireOwnerOrAdmin(
+                group.getGroupId(),
+                currentUser
+        )).thenThrow(
+                new GroupAccessDeniedException(
+                        "Only the group owner or an admin can perform this action"
+                )
+        );
 
         assertThrows(
-                BudgetAccessDeniedException.class,
+                GroupAccessDeniedException.class,
                 () -> budgetService.updateBudget(
                         group.getGroupId(),
-                        budget.getBudgetId(),
+                        budgetId,
                         request
                 )
         );
 
         verify(budgetRepository, never())
-                .save(any());
+                .findByBudgetIdAndGroupAndArchivedFalse(
+                        any(),
+                        any()
+                );
+
+        verify(budgetRepository, never()).save(any());
     }
 
     @Test
     void shouldThrowWhenUpdatedBudgetOverlapsAnotherBudget() {
-
         Budget budget =
                 createBudget(
                         BudgetType.MONTHLY,
@@ -755,10 +619,13 @@ class BudgetServiceTest {
                         LocalDate.of(2026, 9, 15)
                 );
 
-        mockCurrentUserAndOwner();
+        mockCurrentUserAndBudgetManager();
 
         when(budgetRepository
-                .findByBudgetIdAndArchivedFalse(budget.getBudgetId()))
+                .findByBudgetIdAndGroupAndArchivedFalse(
+                        budget.getBudgetId(),
+                        group
+                ))
                 .thenReturn(Optional.of(budget));
 
         when(budgetRepository
@@ -779,13 +646,11 @@ class BudgetServiceTest {
                 )
         );
 
-        verify(budgetRepository, never())
-                .save(any());
+        verify(budgetRepository, never()).save(any());
     }
 
     @Test
     void shouldArchiveBudgetSuccessfully() {
-
         Budget budget =
                 createBudget(
                         BudgetType.MONTHLY,
@@ -794,10 +659,13 @@ class BudgetServiceTest {
                         LocalDate.of(2026, 8, 31)
                 );
 
-        mockCurrentUserAndOwner();
+        mockCurrentUserAndBudgetManager();
 
         when(budgetRepository
-                .findByBudgetIdAndArchivedFalse(budget.getBudgetId()))
+                .findByBudgetIdAndGroupAndArchivedFalse(
+                        budget.getBudgetId(),
+                        group
+                ))
                 .thenReturn(Optional.of(budget));
 
         budgetService.archiveBudget(
@@ -807,65 +675,70 @@ class BudgetServiceTest {
 
         assertTrue(budget.isArchived());
 
-        verify(budgetRepository)
-                .save(budget);
+        verify(groupAccessService).requireOwnerOrAdmin(
+                group.getGroupId(),
+                currentUser
+        );
+
+        verify(budgetRepository).save(budget);
     }
 
     @Test
     void shouldThrowWhenMemberArchivesBudget() {
-
-        Budget budget =
-                createBudget(
-                        BudgetType.MONTHLY,
-                        BigDecimal.valueOf(30000),
-                        LocalDate.of(2026, 8, 1),
-                        LocalDate.of(2026, 8, 31)
-                );
-
-        GroupMember memberMembership =
-                createMembership(GroupRole.MEMBER);
+        UUID budgetId = UUID.randomUUID();
 
         mockCurrentUser();
 
-        when(groupRepository
-                .findByGroupIdAndArchivedFalse(group.getGroupId()))
-                .thenReturn(Optional.of(group));
-
-        when(groupMemberRepository
-                .findByGroupAndUser(group, currentUser))
-                .thenReturn(Optional.of(memberMembership));
-
-        assertThrows(
-                BudgetAccessDeniedException.class,
-                () -> budgetService.archiveBudget(
-                        group.getGroupId(),
-                        budget.getBudgetId()
+        when(groupAccessService.requireOwnerOrAdmin(
+                group.getGroupId(),
+                currentUser
+        )).thenThrow(
+                new GroupAccessDeniedException(
+                        "Only the group owner or an admin can perform this action"
                 )
         );
 
-        assertFalse(budget.isArchived());
+        assertThrows(
+                GroupAccessDeniedException.class,
+                () -> budgetService.archiveBudget(
+                        group.getGroupId(),
+                        budgetId
+                )
+        );
 
         verify(budgetRepository, never())
-                .save(any());
+                .findByBudgetIdAndGroupAndArchivedFalse(
+                        any(),
+                        any()
+                );
+
+        verify(budgetRepository, never()).save(any());
     }
 
     private void mockCurrentUser() {
 
-        when(userRepository.findByEmail("swathi@gmail.com"))
-                .thenReturn(Optional.of(currentUser));
+        when(currentUserService.getCurrentUser())
+                .thenReturn(currentUser);
     }
 
-    private void mockCurrentUserAndOwner() {
 
+
+    private void mockCurrentUserAndBudgetManager() {
         mockCurrentUser();
 
-        when(groupRepository
-                .findByGroupIdAndArchivedFalse(group.getGroupId()))
-                .thenReturn(Optional.of(group));
+        when(groupAccessService.requireOwnerOrAdmin(
+                group.getGroupId(),
+                currentUser
+        )).thenReturn(group);
+    }
 
-        when(groupMemberRepository
-                .findByGroupAndUser(group, currentUser))
-                .thenReturn(Optional.of(ownerMembership));
+    private void mockCurrentUserAndGroupMember() {
+        mockCurrentUser();
+
+        when(groupAccessService.requireMember(
+                group.getGroupId(),
+                currentUser
+        )).thenReturn(group);
     }
 
     private CreateBudgetRequest createMonthlyRequest() {
@@ -878,17 +751,6 @@ class BudgetServiceTest {
         );
     }
 
-    private GroupMember createMembership(GroupRole role) {
-
-        GroupMember membership = new GroupMember();
-
-        membership.setMemberId(UUID.randomUUID());
-        membership.setGroup(group);
-        membership.setUser(currentUser);
-        membership.setRole(role);
-
-        return membership;
-    }
 
     private Budget createBudget(
             BudgetType budgetType,
@@ -911,19 +773,208 @@ class BudgetServiceTest {
         return budget;
     }
 
-    private Group createAnotherGroup() {
+    @Test
+    void shouldCalculateBudgetUsageFromExpenses() {
+        Budget budget = createBudget(
+                BudgetType.MONTHLY,
+                new BigDecimal("1000.00"),
+                LocalDate.of(2026, 8, 1),
+                LocalDate.of(2026, 8, 31)
+        );
 
-        GroupSettings settings = new GroupSettings();
-        settings.setBudgetEnabled(true);
+        mockCurrentUserAndGroupMember();
 
-        Group anotherGroup = new Group();
-        anotherGroup.setGroupId(UUID.randomUUID());
-        anotherGroup.setName("Another Group");
-        anotherGroup.setGroupType(GroupType.CUSTOM);
-        anotherGroup.setArchived(false);
-        anotherGroup.setCreatedBy(currentUser);
-        anotherGroup.setSettings(settings);
+        when(budgetRepository
+                .findByBudgetIdAndGroupAndArchivedFalse(
+                        budget.getBudgetId(),
+                        group
+                ))
+                .thenReturn(Optional.of(budget));
 
-        return anotherGroup;
+        when(expenseRepository.getTotalExpenseForBudgetPeriod(
+                group,
+                budget.getStartDate(),
+                budget.getEndDate()
+        )).thenReturn(new BigDecimal("333.33"));
+
+        BudgetResponse response = budgetService.getBudgetById(
+                group.getGroupId(),
+                budget.getBudgetId()
+        );
+
+        assertEquals(
+                new BigDecimal("333.33"),
+                response.getSpentAmount()
+        );
+
+        assertEquals(
+                new BigDecimal("666.67"),
+                response.getRemainingAmount()
+        );
+
+        assertEquals(
+                new BigDecimal("33.33"),
+                response.getPercentageUsed()
+        );
+
+        assertFalse(response.isExceeded());
+
+        verify(expenseRepository)
+                .getTotalExpenseForBudgetPeriod(
+                        group,
+                        budget.getStartDate(),
+                        budget.getEndDate()
+                );
     }
+
+    @Test
+    void shouldMarkBudgetAsExceededWhenSpendingExceedsLimit() {
+        Budget budget = createBudget(
+                BudgetType.MONTHLY,
+                new BigDecimal("1000.00"),
+                LocalDate.of(2026, 8, 1),
+                LocalDate.of(2026, 8, 31)
+        );
+
+        mockCurrentUserAndGroupMember();
+
+        when(budgetRepository
+                .findByBudgetIdAndGroupAndArchivedFalse(
+                        budget.getBudgetId(),
+                        group
+                ))
+                .thenReturn(Optional.of(budget));
+
+        when(expenseRepository.getTotalExpenseForBudgetPeriod(
+                group,
+                budget.getStartDate(),
+                budget.getEndDate()
+        )).thenReturn(new BigDecimal("1250.50"));
+
+        BudgetResponse response = budgetService.getBudgetById(
+                group.getGroupId(),
+                budget.getBudgetId()
+        );
+
+        assertEquals(
+                new BigDecimal("1250.50"),
+                response.getSpentAmount()
+        );
+
+        assertEquals(
+                new BigDecimal("-250.50"),
+                response.getRemainingAmount()
+        );
+
+        assertEquals(
+                new BigDecimal("125.05"),
+                response.getPercentageUsed()
+        );
+
+        assertTrue(response.isExceeded());
+    }
+
+    @Test
+    void shouldNotMarkBudgetAsExceededAtExactLimit() {
+        Budget budget = createBudget(
+                BudgetType.MONTHLY,
+                new BigDecimal("1000.00"),
+                LocalDate.of(2026, 8, 1),
+                LocalDate.of(2026, 8, 31)
+        );
+
+        mockCurrentUserAndGroupMember();
+
+        when(budgetRepository
+                .findByBudgetIdAndGroupAndArchivedFalse(
+                        budget.getBudgetId(),
+                        group
+                ))
+                .thenReturn(Optional.of(budget));
+
+        when(expenseRepository.getTotalExpenseForBudgetPeriod(
+                group,
+                budget.getStartDate(),
+                budget.getEndDate()
+        )).thenReturn(new BigDecimal("1000.00"));
+
+        BudgetResponse response = budgetService.getBudgetById(
+                group.getGroupId(),
+                budget.getBudgetId()
+        );
+
+        assertEquals(
+                new BigDecimal("1000.00"),
+                response.getSpentAmount()
+        );
+
+        assertEquals(
+                new BigDecimal("0.00"),
+                response.getRemainingAmount()
+        );
+
+        assertEquals(
+                new BigDecimal("100.00"),
+                response.getPercentageUsed()
+        );
+
+        assertFalse(response.isExceeded());
+    }
+
+    @Test
+    void shouldReturnActiveBudgetsForUser() {
+        LocalDate today = LocalDate.of(2026, 8, 6);
+
+        Budget budget = createBudget(
+                BudgetType.MONTHLY,
+                new BigDecimal("1000.00"),
+                LocalDate.of(2026, 8, 1),
+                LocalDate.of(2026, 8, 31)
+        );
+
+        when(budgetRepository.findActiveBudgetsForUser(
+                currentUser,
+                today
+        )).thenReturn(List.of(budget));
+
+        when(expenseRepository.getTotalExpenseForBudgetPeriod(
+                group,
+                budget.getStartDate(),
+                budget.getEndDate()
+        )).thenReturn(new BigDecimal("250.00"));
+
+        List<BudgetResponse> responses =
+                budgetService.getActiveBudgetsForUser(
+                        currentUser,
+                        today
+                );
+
+        assertEquals(1, responses.size());
+
+        BudgetResponse response = responses.get(0);
+
+        assertEquals(
+                new BigDecimal("250.00"),
+                response.getSpentAmount()
+        );
+
+        assertEquals(
+                new BigDecimal("750.00"),
+                response.getRemainingAmount()
+        );
+
+        assertEquals(
+                new BigDecimal("25.00"),
+                response.getPercentageUsed()
+        );
+
+        assertFalse(response.isExceeded());
+
+        verify(budgetRepository)
+                .findActiveBudgetsForUser(
+                        currentUser,
+                        today
+                );
+    }
+
 }

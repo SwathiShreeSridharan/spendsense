@@ -23,7 +23,7 @@ public class UserRepositoryTest {
     void shouldSaveUser(){
         User user = new User(
                 "Swath",
-                "swa2@gmail.com",
+                "swathi1@gmail.com",
                 "1234567890",
                 "hashed-password"
         );
@@ -39,25 +39,24 @@ public class UserRepositoryTest {
     void shouldFindUserByEmail(){
         User user = new User(
                 "Swath",
-                "swa2@gmail.com",
+                "swathi2@gmail.com",
                 "1234567890",
                 "hashed-password"
         );
 
         User savedUser = userRepository.save(user);
 
-        Optional<User> foundUser = userRepository.findByEmail("swa2@gmail.com");
+        Optional<User> foundUser = userRepository.findByEmail("swathi2@gmail.com");
 
         assertTrue(foundUser.isPresent());
         assertEquals("Swath",foundUser.get().getName());
-        assertEquals("swa2@gmail.com",foundUser.get().getEmail());
+        assertEquals("swathi2@gmail.com",foundUser.get().getEmail());
     }
 
     @Test
     void shouldReturnEmptyWhenEmailDoesNotExist() {
         Optional<User> foundUser =
                 userRepository.findByEmail("unknown@gmail.com");
-
         assertTrue(foundUser.isEmpty());
     }
 

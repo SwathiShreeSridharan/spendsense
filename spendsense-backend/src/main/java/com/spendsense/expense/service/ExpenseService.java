@@ -3,14 +3,17 @@ package com.spendsense.expense.service;
 import com.spendsense.category.entity.Category;
 import com.spendsense.category.repository.CategoryRepository;
 import com.spendsense.exception.CategoryNotFoundException;
+import com.spendsense.exception.GroupNotFoundException;
 import com.spendsense.expense.dto.CreateExpenseRequest;
 import com.spendsense.expense.dto.ExpenseResponse;
 import com.spendsense.expense.entity.Expense;
 import com.spendsense.expense.repository.ExpenseRepository;
+import com.spendsense.group.entity.Group;
+import com.spendsense.group.repository.GroupMemberRepository;
+import com.spendsense.group.repository.GroupRepository;
+import com.spendsense.group.service.GroupAccessService;
+import com.spendsense.security.CurrentUserService;
 import com.spendsense.user.entity.User;
-import com.spendsense.user.repository.UserRepository;
-import org.springframework.security.core.Authentication;
-import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Service;
 
 import java.util.List;
@@ -20,29 +23,38 @@ import java.util.UUID;
 public class ExpenseService {
     private final ExpenseRepository expenseRepository;
     private final CategoryRepository categoryRepository;
-    private final UserRepository userRepository;
+    private final CurrentUserService currentUserService;
+    private GroupAccessService groupAccessService;
 
     public ExpenseService(
             ExpenseRepository expenseRepository,
             CategoryRepository categoryRepository,
-            UserRepository userRepository
+            CurrentUserService currentUserService, GroupAccessService groupAccessService
     ) {
         this.expenseRepository = expenseRepository;
         this.categoryRepository = categoryRepository;
-        this.userRepository = userRepository;
+        this.currentUserService = currentUserService;
+        this.groupAccessService = groupAccessService;
     }
 
-    public ExpenseResponse createExpense(CreateExpenseRequest request) {
+    public ExpenseResponse createExpense(UUID groupId, CreateExpenseRequest request) {
 
-        User currentUser = getCurrentUser();
+        User currentUser = currentUserService.getCurrentUser();
 
-        Category category = getCategory(request.getCategoryId());
+        Group group =
+                groupAccessService.requireMember(
+                        groupId,
+                        currentUser
+                );
+
+        Category category = getCategory(request.getCategoryId(), group);
 
         Expense expense = new Expense(
                 request.getTitle(),
                 request.getDescription(),
                 request.getAmount(),
                 request.getExpenseDate(),
+                group,
                 category,
                 currentUser,
                 currentUser
@@ -53,30 +65,21 @@ public class ExpenseService {
         return mapToResponse(savedExpense);
     }
 
-    public List<ExpenseResponse> getExpenses(){
-        User currentUser = getCurrentUser();
+    public List<ExpenseResponse> getExpenses(UUID groupId){
+        User currentUser = currentUserService.getCurrentUser();
+
+        Group group =
+                groupAccessService.requireMember(
+                        groupId,
+                        currentUser
+                );
 
         List<Expense> expenses =
-                expenseRepository.findByCreatedBy(currentUser);
+                expenseRepository.findByGroupOrderByExpenseDateDescCreatedAtDesc(group);
 
         return expenses.stream().map(this::mapToResponse).toList();
     }
 
-    private User getCurrentUser() {
-
-        Authentication authentication =
-                SecurityContextHolder
-                        .getContext()
-                        .getAuthentication();
-
-        String email = authentication.getName();
-
-        return userRepository
-                .findByEmail(email)
-                .orElseThrow(
-                        () -> new RuntimeException("User not found")
-                );
-    }
 
     private ExpenseResponse mapToResponse(Expense expense) {
 
@@ -96,10 +99,10 @@ public class ExpenseService {
         );
     }
 
-    public Category getCategory(UUID categoryId){
+    public Category getCategory(UUID categoryId, Group group){
 
         return categoryRepository
-                .findById(categoryId)
+                .findByCategoryIdAndGroup(categoryId, group)
                 .orElseThrow(()->
                          new CategoryNotFoundException("Category not found"));
     }

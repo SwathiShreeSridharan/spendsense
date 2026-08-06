@@ -1,6 +1,7 @@
 package com.spendsense.group.service;
 
 import com.spendsense.exception.DuplicateGroupException;
+import com.spendsense.exception.GroupAccessDeniedException;
 import com.spendsense.exception.GroupNotFoundException;
 import com.spendsense.group.dto.CreateGroupRequest;
 import com.spendsense.group.dto.GroupResponse;
@@ -12,8 +13,10 @@ import com.spendsense.group.entity.GroupType;
 import com.spendsense.group.entity.GroupSettings;
 import com.spendsense.group.repository.GroupMemberRepository;
 import com.spendsense.group.repository.GroupRepository;
+import com.spendsense.security.CurrentUserService;
 import com.spendsense.user.entity.User;
 import com.spendsense.user.repository.UserRepository;
+import org.hibernate.type.descriptor.java.CurrencyJavaType;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -43,7 +46,10 @@ class GroupServiceTest {
     private GroupMemberRepository groupMemberRepository;
 
     @Mock
-    private UserRepository userRepository;
+    private CurrentUserService currentUserService;
+
+    @Mock
+    private GroupAccessService groupAccessService;
 
     @InjectMocks
     private GroupService groupService;
@@ -58,19 +64,8 @@ class GroupServiceTest {
         currentUser.setName("Swathi");
         currentUser.setEmail("swathi@gmail.com");
 
-        SecurityContextHolder
-                .getContext()
-                .setAuthentication(
-                        new UsernamePasswordAuthenticationToken(
-                                "swathi@gmail.com",
-                                null
-                        )
-                );
-    }
-
-    @AfterEach
-    void tearDown() {
-        SecurityContextHolder.clearContext();
+        when(currentUserService.getCurrentUser())
+                .thenReturn(currentUser);
     }
 
     @Test
@@ -88,8 +83,6 @@ class GroupServiceTest {
                         true
                 );
 
-        when(userRepository.findByEmail("swathi@gmail.com"))
-                .thenReturn(Optional.of(currentUser));
 
         when(groupRepository
                 .existsByCreatedByAndNameIgnoreCaseAndArchivedFalse(
@@ -204,9 +197,6 @@ class GroupServiceTest {
                         true
                 );
 
-        when(userRepository.findByEmail("swathi@gmail.com"))
-                .thenReturn(Optional.of(currentUser));
-
         when(groupRepository
                 .existsByCreatedByAndNameIgnoreCaseAndArchivedFalse(
                         currentUser,
@@ -233,10 +223,6 @@ class GroupServiceTest {
 
         assertTrue(response.isSplitEnabled());
 
-        /*
-         * Default values should be applied when
-         * color and icon are missing.
-         */
         assertEquals(
                 "#2196F3",
                 response.getColor()
@@ -269,8 +255,6 @@ class GroupServiceTest {
                         true
                 );
 
-        when(userRepository.findByEmail("swathi@gmail.com"))
-                .thenReturn(Optional.of(currentUser));
 
         when(groupRepository
                 .existsByCreatedByAndNameIgnoreCaseAndArchivedFalse(
@@ -328,8 +312,6 @@ class GroupServiceTest {
                         GroupRole.MEMBER
                 );
 
-        when(userRepository.findByEmail("swathi@gmail.com"))
-                .thenReturn(Optional.of(currentUser));
 
         when(groupMemberRepository.findByUser(currentUser))
                 .thenReturn(
@@ -364,38 +346,26 @@ class GroupServiceTest {
     @Test
     void shouldReturnGroupByIdWhenCurrentUserIsMember() {
 
-        Group group =
-                createGroup(
-                        "Family",
-                        GroupType.FAMILY,
-                        false
-                );
+        Group group = createGroup(
+                "Family",
+                GroupType.FAMILY,
+                false
+        );
 
-        when(userRepository.findByEmail("swathi@gmail.com"))
-                .thenReturn(Optional.of(currentUser));
+        UUID groupId = group.getGroupId();
 
-        when(groupRepository
-                .findByGroupIdAndArchivedFalse(
-                        group.getGroupId()
-                ))
-                .thenReturn(Optional.of(group));
-
-        when(groupMemberRepository
-                .existsByGroupAndUser(
-                        group,
-                        currentUser
-                ))
-                .thenReturn(true);
+        when(groupAccessService.requireMember(
+                groupId,
+                currentUser
+        )).thenReturn(group);
 
         GroupResponse response =
-                groupService.getGroupById(
-                        group.getGroupId()
-                );
+                groupService.getGroupById(groupId);
 
         assertNotNull(response);
 
         assertEquals(
-                group.getGroupId(),
+                groupId,
                 response.getGroupId()
         );
 
@@ -404,9 +374,14 @@ class GroupServiceTest {
                 response.getName()
         );
 
-        verify(groupMemberRepository)
-                .existsByGroupAndUser(
-                        group,
+        assertEquals(
+                GroupType.FAMILY,
+                response.getGroupType()
+        );
+
+        verify(groupAccessService)
+                .requireMember(
+                        groupId,
                         currentUser
                 );
     }
@@ -416,75 +391,83 @@ class GroupServiceTest {
 
         UUID groupId = UUID.randomUUID();
 
-        when(userRepository.findByEmail("swathi@gmail.com"))
-                .thenReturn(Optional.of(currentUser));
-
-        when(groupRepository
-                .findByGroupIdAndArchivedFalse(groupId))
-                .thenReturn(Optional.empty());
-
-        assertThrows(
-                GroupNotFoundException.class,
-                () -> groupService.getGroupById(groupId)
+        when(groupAccessService.requireMember(
+                groupId,
+                currentUser
+        )).thenThrow(
+                new GroupNotFoundException(
+                        "Group not found"
+                )
         );
 
-        verify(groupMemberRepository, never())
-                .existsByGroupAndUser(
-                        any(Group.class),
-                        any(User.class)
+        GroupNotFoundException exception =
+                assertThrows(
+                        GroupNotFoundException.class,
+                        () -> groupService.getGroupById(
+                                groupId
+                        )
+                );
+
+        assertEquals(
+                "Group not found",
+                exception.getMessage()
+        );
+
+        verify(groupAccessService)
+                .requireMember(
+                        groupId,
+                        currentUser
                 );
     }
 
     @Test
     void shouldThrowGroupNotFoundExceptionWhenCurrentUserIsNotMember() {
 
-        Group group =
-                createGroup(
-                        "Private Group",
-                        GroupType.CUSTOM,
-                        false
-                );
+        Group group = createGroup(
+                "Family",
+                GroupType.FAMILY,
+                false
+        );
 
-        when(userRepository.findByEmail("swathi@gmail.com"))
-                .thenReturn(Optional.of(currentUser));
+        UUID groupId = group.getGroupId();
 
-        when(groupRepository
-                .findByGroupIdAndArchivedFalse(
-                        group.getGroupId()
-                ))
-                .thenReturn(Optional.of(group));
-
-        when(groupMemberRepository
-                .existsByGroupAndUser(
-                        group,
-                        currentUser
-                ))
-                .thenReturn(false);
-
-        assertThrows(
-                GroupNotFoundException.class,
-                () -> groupService.getGroupById(
-                        group.getGroupId()
+        when(groupAccessService.requireMember(
+                groupId,
+                currentUser
+        )).thenThrow(
+                new GroupNotFoundException(
+                        "Group not found"
                 )
         );
+
+        GroupNotFoundException exception =
+                assertThrows(
+                        GroupNotFoundException.class,
+                        () -> groupService.getGroupById(
+                                groupId
+                        )
+                );
+
+        assertEquals(
+                "Group not found",
+                exception.getMessage()
+        );
+
+        verify(groupAccessService)
+                .requireMember(
+                        groupId,
+                        currentUser
+                );
     }
 
     @Test
     void shouldUpdateGroupSuccessfullyWhenCurrentUserIsOwner() {
 
-        Group group =
-                createGroup(
-                        "Family",
-                        GroupType.FAMILY,
-                        false
-                );
-
-        GroupMember ownerMembership =
-                createMembership(
-                        group,
-                        currentUser,
-                        GroupRole.OWNER
-                );
+        Group group = createGroup(
+                "Family",
+                GroupType.FAMILY,
+                false
+        );
 
         UpdateGroupRequest request =
                 new UpdateGroupRequest(
@@ -494,21 +477,10 @@ class GroupServiceTest {
                         "family"
                 );
 
-        when(userRepository.findByEmail("swathi@gmail.com"))
-                .thenReturn(Optional.of(currentUser));
-
-        when(groupRepository
-                .findByGroupIdAndArchivedFalse(
-                        group.getGroupId()
-                ))
-                .thenReturn(Optional.of(group));
-
-        when(groupMemberRepository
-                .findByGroupAndUser(
-                        group,
-                        currentUser
-                ))
-                .thenReturn(Optional.of(ownerMembership));
+        when(groupAccessService.requireOwner(
+                group.getGroupId(),
+                currentUser
+        )).thenReturn(group);
 
         when(groupRepository
                 .existsByCreatedByAndNameIgnoreCaseAndArchivedFalse(
@@ -526,46 +498,31 @@ class GroupServiceTest {
                         request
                 );
 
-        assertEquals(
-                "My Family",
-                response.getName()
-        );
-
+        assertEquals("My Family", response.getName());
         assertEquals(
                 "Updated family description",
                 response.getDescription()
         );
+        assertEquals("#4CAF50", response.getColor());
+        assertEquals("family", response.getIcon());
 
-        assertEquals(
-                "#4CAF50",
-                response.getColor()
-        );
+        verify(groupAccessService)
+                .requireOwner(
+                        group.getGroupId(),
+                        currentUser
+                );
 
-        assertEquals(
-                "family",
-                response.getIcon()
-        );
-
-        verify(groupRepository)
-                .save(group);
+        verify(groupRepository).save(group);
     }
 
     @Test
     void shouldNotCheckDuplicateNameWhenNameHasNotChanged() {
 
-        Group group =
-                createGroup(
-                        "Family",
-                        GroupType.FAMILY,
-                        false
-                );
-
-        GroupMember ownerMembership =
-                createMembership(
-                        group,
-                        currentUser,
-                        GroupRole.OWNER
-                );
+        Group group = createGroup(
+                "Family",
+                GroupType.FAMILY,
+                false
+        );
 
         UpdateGroupRequest request =
                 new UpdateGroupRequest(
@@ -575,21 +532,10 @@ class GroupServiceTest {
                         "home"
                 );
 
-        when(userRepository.findByEmail("swathi@gmail.com"))
-                .thenReturn(Optional.of(currentUser));
-
-        when(groupRepository
-                .findByGroupIdAndArchivedFalse(
-                        group.getGroupId()
-                ))
-                .thenReturn(Optional.of(group));
-
-        when(groupMemberRepository
-                .findByGroupAndUser(
-                        group,
-                        currentUser
-                ))
-                .thenReturn(Optional.of(ownerMembership));
+        when(groupAccessService.requireOwner(
+                group.getGroupId(),
+                currentUser
+        )).thenReturn(group);
 
         when(groupRepository.save(group))
                 .thenReturn(group);
@@ -600,10 +546,7 @@ class GroupServiceTest {
                         request
                 );
 
-        assertEquals(
-                "family",
-                response.getName()
-        );
+        assertEquals("family", response.getName());
 
         verify(
                 groupRepository,
@@ -613,26 +556,17 @@ class GroupServiceTest {
                 anyString()
         );
 
-        verify(groupRepository)
-                .save(group);
+        verify(groupRepository).save(group);
     }
 
     @Test
     void shouldThrowDuplicateGroupExceptionWhenUpdatedNameAlreadyExists() {
 
-        Group group =
-                createGroup(
-                        "Family",
-                        GroupType.FAMILY,
-                        false
-                );
-
-        GroupMember ownerMembership =
-                createMembership(
-                        group,
-                        currentUser,
-                        GroupRole.OWNER
-                );
+        Group group = createGroup(
+                "Family",
+                GroupType.FAMILY,
+                false
+        );
 
         UpdateGroupRequest request =
                 new UpdateGroupRequest(
@@ -642,21 +576,10 @@ class GroupServiceTest {
                         "trip"
                 );
 
-        when(userRepository.findByEmail("swathi@gmail.com"))
-                .thenReturn(Optional.of(currentUser));
-
-        when(groupRepository
-                .findByGroupIdAndArchivedFalse(
-                        group.getGroupId()
-                ))
-                .thenReturn(Optional.of(group));
-
-        when(groupMemberRepository
-                .findByGroupAndUser(
-                        group,
-                        currentUser
-                ))
-                .thenReturn(Optional.of(ownerMembership));
+        when(groupAccessService.requireOwner(
+                group.getGroupId(),
+                currentUser
+        )).thenReturn(group);
 
         when(groupRepository
                 .existsByCreatedByAndNameIgnoreCaseAndArchivedFalse(
@@ -680,19 +603,11 @@ class GroupServiceTest {
     @Test
     void shouldThrowExceptionWhenNonOwnerUpdatesGroup() {
 
-        Group group =
-                createGroup(
-                        "Family",
-                        GroupType.FAMILY,
-                        false
-                );
-
-        GroupMember memberMembership =
-                createMembership(
-                        group,
-                        currentUser,
-                        GroupRole.MEMBER
-                );
+        Group group = createGroup(
+                "Family",
+                GroupType.FAMILY,
+                false
+        );
 
         UpdateGroupRequest request =
                 new UpdateGroupRequest(
@@ -702,25 +617,18 @@ class GroupServiceTest {
                         "home"
                 );
 
-        when(userRepository.findByEmail("swathi@gmail.com"))
-                .thenReturn(Optional.of(currentUser));
+        when(groupAccessService.requireOwner(
+                group.getGroupId(),
+                currentUser
+        )).thenThrow(
+                new GroupAccessDeniedException(
+                        "Only the group owner can perform this action"
+                )
+        );
 
-        when(groupRepository
-                .findByGroupIdAndArchivedFalse(
-                        group.getGroupId()
-                ))
-                .thenReturn(Optional.of(group));
-
-        when(groupMemberRepository
-                .findByGroupAndUser(
-                        group,
-                        currentUser
-                ))
-                .thenReturn(Optional.of(memberMembership));
-
-        RuntimeException exception =
+        GroupAccessDeniedException exception =
                 assertThrows(
-                        RuntimeException.class,
+                        GroupAccessDeniedException.class,
                         () -> groupService.updateGroup(
                                 group.getGroupId(),
                                 request
@@ -728,52 +636,39 @@ class GroupServiceTest {
                 );
 
         assertEquals(
-                "Only the group owner can update the group",
+                "Only the group owner can perform this action",
                 exception.getMessage()
         );
 
         verify(groupRepository, never())
-                .save(group);
+                .save(any(Group.class));
     }
 
     @Test
     void shouldArchiveGroupSuccessfullyWhenCurrentUserIsOwner() {
 
-        Group group =
-                createGroup(
-                        "Goa Trip",
-                        GroupType.CUSTOM,
-                        false
-                );
+        Group group = createGroup(
+                "Goa Trip",
+                GroupType.CUSTOM,
+                false
+        );
 
-        GroupMember ownerMembership =
-                createMembership(
-                        group,
-                        currentUser,
-                        GroupRole.OWNER
-                );
-
-        when(userRepository.findByEmail("swathi@gmail.com"))
-                .thenReturn(Optional.of(currentUser));
-
-        when(groupRepository
-                .findByGroupIdAndArchivedFalse(
-                        group.getGroupId()
-                ))
-                .thenReturn(Optional.of(group));
-
-        when(groupMemberRepository
-                .findByGroupAndUser(
-                        group,
-                        currentUser
-                ))
-                .thenReturn(Optional.of(ownerMembership));
+        when(groupAccessService.requireOwner(
+                group.getGroupId(),
+                currentUser
+        )).thenReturn(group);
 
         groupService.archiveGroup(
                 group.getGroupId()
         );
 
         assertTrue(group.isArchived());
+
+        verify(groupAccessService)
+                .requireOwner(
+                        group.getGroupId(),
+                        currentUser
+                );
 
         verify(groupRepository)
                 .save(group);
@@ -782,53 +677,38 @@ class GroupServiceTest {
     @Test
     void shouldThrowExceptionWhenNonOwnerArchivesGroup() {
 
-        Group group =
-                createGroup(
-                        "Goa Trip",
-                        GroupType.CUSTOM,
-                        false
-                );
+        Group group = createGroup(
+                "Goa Trip",
+                GroupType.CUSTOM,
+                false
+        );
 
-        GroupMember memberMembership =
-                createMembership(
-                        group,
-                        currentUser,
-                        GroupRole.MEMBER
-                );
+        when(groupAccessService.requireOwner(
+                group.getGroupId(),
+                currentUser
+        )).thenThrow(
+                new GroupAccessDeniedException(
+                        "Only the group owner can perform this action"
+                )
+        );
 
-        when(userRepository.findByEmail("swathi@gmail.com"))
-                .thenReturn(Optional.of(currentUser));
-
-        when(groupRepository
-                .findByGroupIdAndArchivedFalse(
-                        group.getGroupId()
-                ))
-                .thenReturn(Optional.of(group));
-
-        when(groupMemberRepository
-                .findByGroupAndUser(
-                        group,
-                        currentUser
-                ))
-                .thenReturn(Optional.of(memberMembership));
-
-        RuntimeException exception =
+        GroupAccessDeniedException exception =
                 assertThrows(
-                        RuntimeException.class,
+                        GroupAccessDeniedException.class,
                         () -> groupService.archiveGroup(
                                 group.getGroupId()
                         )
                 );
 
         assertEquals(
-                "Only the group owner can archive the group",
+                "Only the group owner can perform this action",
                 exception.getMessage()
         );
 
         assertFalse(group.isArchived());
 
         verify(groupRepository, never())
-                .save(group);
+                .save(any(Group.class));
     }
 
     private Group createGroup(

@@ -3,9 +3,12 @@ package com.spendsense.expense.service;
 import com.spendsense.category.entity.Category;
 import com.spendsense.category.repository.CategoryRepository;
 import com.spendsense.exception.CategoryNotFoundException;
+import com.spendsense.exception.ExpenseNotFoundException;
+import com.spendsense.exception.GroupAccessDeniedException;
 import com.spendsense.exception.GroupNotFoundException;
 import com.spendsense.expense.dto.CreateExpenseRequest;
 import com.spendsense.expense.dto.ExpenseResponse;
+import com.spendsense.expense.dto.UpdateExpenseRequest;
 import com.spendsense.expense.entity.Expense;
 import com.spendsense.expense.repository.ExpenseRepository;
 import com.spendsense.group.entity.Group;
@@ -34,8 +37,7 @@ import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.*;
 
@@ -71,6 +73,7 @@ public class ExpenseServiceTest {
 
         user = new User();
         user.setEmail("test@gmail.com");
+        user.setUserId(UUID.randomUUID());
 
         when(currentUserService.getCurrentUser()).thenReturn(user);
 
@@ -178,7 +181,7 @@ public class ExpenseServiceTest {
                 user
         );
 
-        when(expenseRepository.findByGroupOrderByExpenseDateDescCreatedAtDesc(group))
+        when(expenseRepository.findByGroupAndArchivedFalseOrderByExpenseDateDescCreatedAtDesc(group))
                 .thenReturn(List.of(expense));
 
         List<ExpenseResponse> responses =
@@ -188,7 +191,7 @@ public class ExpenseServiceTest {
         assertEquals("Lunch", responses.getFirst().getTitle());
 
         verify(expenseRepository)
-                .findByGroupOrderByExpenseDateDescCreatedAtDesc(group);
+                .findByGroupAndArchivedFalseOrderByExpenseDateDescCreatedAtDesc(group);
     }
 
     @Test
@@ -230,5 +233,267 @@ public class ExpenseServiceTest {
 
         verify(expenseRepository, never())
                 .save(any());
+    }
+
+    @Test
+    void shouldUpdateExpenseSuccessfully() {
+        UUID expenseId = UUID.randomUUID();
+        UUID categoryId = UUID.randomUUID();
+
+        Category originalCategory = new Category(
+                "Food",
+                "restaurant",
+                "#4CAF50",
+                false,
+                group,
+                user
+        );
+
+        Category updatedCategory = new Category(
+                "Travel",
+                "flight",
+                "#2196F3",
+                false,
+                group,
+                user
+        );
+
+        Expense expense = new Expense(
+                "Lunch",
+                "Office lunch",
+                new BigDecimal("250.00"),
+                LocalDate.of(2026, 8, 1),
+                group,
+                originalCategory,
+                user,
+                user
+        );
+
+        expense.setExpenseId(expenseId);
+
+        UpdateExpenseRequest request =
+                new UpdateExpenseRequest(
+                        "Flight ticket",
+                        "Team travel",
+                        new BigDecimal("1500.00"),
+                        LocalDate.of(2026, 8, 5),
+                        categoryId
+                );
+
+        when(expenseRepository.findByExpenseIdAndGroupAndArchivedFalse(
+                expenseId,
+                group
+        )).thenReturn(Optional.of(expense));
+
+        when(categoryRepository.findByCategoryIdAndGroup(
+                categoryId,
+                group
+        )).thenReturn(Optional.of(updatedCategory));
+
+        when(expenseRepository.save(expense))
+                .thenReturn(expense);
+
+        ExpenseResponse response =
+                expenseService.updateExpense(
+                        groupId,
+                        expenseId,
+                        request
+                );
+
+        assertEquals(
+                "Flight ticket",
+                response.getTitle()
+        );
+
+        assertEquals(
+                new BigDecimal("1500.00"),
+                response.getAmount()
+        );
+
+        assertEquals(
+                "Travel",
+                response.getCategoryName()
+        );
+
+        assertEquals(
+                LocalDate.of(2026, 8, 5),
+                response.getExpenseDate()
+        );
+
+        verify(expenseRepository).save(expense);
+
+        verify(groupAccessService, never())
+                .requireOwnerOrAdmin(
+                        groupId,
+                        user
+                );
+    }
+
+    @Test
+    void shouldRejectUpdateByNonCreatorMember() {
+        UUID expenseId = UUID.randomUUID();
+        UUID categoryId = UUID.randomUUID();
+
+        User creator = new User();
+        creator.setUserId(UUID.randomUUID());
+
+        Category category = new Category(
+                "Food",
+                "restaurant",
+                "#4CAF50",
+                false,
+                group,
+                creator
+        );
+
+        Expense expense = new Expense(
+                "Lunch",
+                "Office lunch",
+                new BigDecimal("250.00"),
+                LocalDate.of(2026, 8, 1),
+                group,
+                category,
+                creator,
+                creator
+        );
+
+        expense.setExpenseId(expenseId);
+
+        UpdateExpenseRequest request =
+                new UpdateExpenseRequest(
+                        "Changed title",
+                        "Changed description",
+                        new BigDecimal("500.00"),
+                        LocalDate.of(2026, 8, 2),
+                        categoryId
+                );
+
+        when(expenseRepository.findByExpenseIdAndGroupAndArchivedFalse(
+                expenseId,
+                group
+        )).thenReturn(Optional.of(expense));
+
+        when(groupAccessService.requireOwnerOrAdmin(
+                groupId,
+                user
+        )).thenThrow(
+                new GroupAccessDeniedException(
+                        "Only the expense creator, group owner, " +
+                                "or admin can update this expense"
+                )
+        );
+
+        assertThrows(
+                GroupAccessDeniedException.class,
+                () -> expenseService.updateExpense(
+                        groupId,
+                        expenseId,
+                        request
+                )
+        );
+
+        verify(categoryRepository, never())
+                .findByCategoryIdAndGroup(
+                        any(),
+                        any()
+                );
+
+        verify(expenseRepository, never())
+                .save(any());
+    }
+
+    @Test
+    void shouldThrowWhenUpdatingMissingExpense() {
+        UUID expenseId = UUID.randomUUID();
+
+        UpdateExpenseRequest request =
+                new UpdateExpenseRequest(
+                        "Updated expense",
+                        "Updated description",
+                        new BigDecimal("500.00"),
+                        LocalDate.of(2026, 8, 2),
+                        UUID.randomUUID()
+                );
+
+        when(expenseRepository.findByExpenseIdAndGroupAndArchivedFalse(
+                expenseId,
+                group
+        )).thenReturn(Optional.empty());
+
+        assertThrows(
+                ExpenseNotFoundException.class,
+                () -> expenseService.updateExpense(
+                        groupId,
+                        expenseId,
+                        request
+                )
+        );
+
+        verify(groupAccessService, never())
+                .requireOwnerOrAdmin(
+                        any(),
+                        any()
+                );
+
+        verify(categoryRepository, never())
+                .findByCategoryIdAndGroup(
+                        any(),
+                        any()
+                );
+
+        verify(expenseRepository, never())
+                .save(any());
+    }
+
+    @Test
+    void shouldArchiveExpenseSuccessfully() {
+        UUID expenseId = UUID.randomUUID();
+
+        Category category = new Category(
+                "Food",
+                "restaurant",
+                "#4CAF50",
+                false,
+                group,
+                user
+        );
+
+        Expense expense = new Expense(
+                "Lunch",
+                "Office lunch",
+                new BigDecimal("250.00"),
+                LocalDate.of(2026, 8, 1),
+                group,
+                category,
+                user,
+                user
+        );
+
+        expense.setExpenseId(expenseId);
+
+        when(expenseRepository
+                .findByExpenseIdAndGroupAndArchivedFalse(
+                        expenseId,
+                        group
+                ))
+                .thenReturn(Optional.of(expense));
+
+        when(expenseRepository.save(expense))
+                .thenReturn(expense);
+
+        expenseService.archiveExpense(
+                groupId,
+                expenseId
+        );
+
+        assertTrue(expense.isArchived());
+
+        verify(expenseRepository).save(expense);
+
+        verify(groupAccessService, never())
+                .requireOwnerOrAdmin(
+                        groupId,
+                        user
+                );
     }
 }

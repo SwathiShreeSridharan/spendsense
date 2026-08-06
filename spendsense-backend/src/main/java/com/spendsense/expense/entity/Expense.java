@@ -54,7 +54,15 @@ public class Expense {
     @Column(name = "updated_at", nullable = false)
     private LocalDateTime updatedAt;
 
+    @Column(
+            name = "archived",
+            nullable = false,
+            columnDefinition = "boolean default false"
+    )
+    private boolean archived = false;
+
     public Expense() {
+        this.archived = false;
     }
 
     public Expense(
@@ -176,5 +184,13 @@ public class Expense {
 
     public void setGroup(Group group) {
         this.group = group;
+    }
+
+    public boolean isArchived() {
+        return archived;
+    }
+
+    public void setArchived(boolean archived) {
+        this.archived = archived;
     }
 }

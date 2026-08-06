@@ -80,7 +80,7 @@ public class DashboardServiceTest {
         when(expenseRepository.getTotalExpense(user))
                 .thenReturn(BigDecimal.valueOf(25000));
 
-        when(expenseRepository.countByCreatedBy(user))
+        when(expenseRepository.countByCreatedByAndArchivedFalse(user))
                 .thenReturn(40L);
 
         BudgetResponse activeBudget =
@@ -141,7 +141,7 @@ public class DashboardServiceTest {
                 .getTotalExpense(user);
 
         verify(expenseRepository)
-                .countByCreatedBy(user);
+                .countByCreatedByAndArchivedFalse(user);
 
         verify(budgetService)
                 .getActiveBudgetsForUser(

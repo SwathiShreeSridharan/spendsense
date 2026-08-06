@@ -9,9 +9,6 @@ import com.spendsense.dashboard.projection.MonthlyExpenseProjection;
 import com.spendsense.expense.repository.ExpenseRepository;
 import com.spendsense.security.CurrentUserService;
 import com.spendsense.user.entity.User;
-import com.spendsense.user.repository.UserRepository;
-import org.springframework.security.core.Authentication;
-import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Service;
 
 import java.math.BigDecimal;
@@ -72,7 +69,7 @@ public class DashboardService {
                 );
 
         long expenseCount =
-                expenseRepository.countByCreatedBy(
+                expenseRepository.countByCreatedByAndArchivedFalse(
                         currentUser
                 );
 

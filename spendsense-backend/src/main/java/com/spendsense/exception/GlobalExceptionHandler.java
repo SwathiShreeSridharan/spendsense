@@ -26,7 +26,8 @@ public class GlobalExceptionHandler {
             DuplicateEmailException.class,
             DuplicateCategoryException.class,
             DuplicateGroupException.class,
-            BudgetAlreadyExistsException.class
+            BudgetAlreadyExistsException.class,
+            ExpenseNotFoundException.class
     })
     public ResponseEntity<ApiErrorResponse> handleConflict(
             RuntimeException exception,

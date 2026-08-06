@@ -2,6 +2,7 @@ package com.spendsense.expense.controller;
 
 import com.spendsense.expense.dto.CreateExpenseRequest;
 import com.spendsense.expense.dto.ExpenseResponse;
+import com.spendsense.expense.dto.UpdateExpenseRequest;
 import com.spendsense.expense.service.ExpenseService;
 import jakarta.validation.Valid;
 import org.springframework.http.HttpStatus;
@@ -32,5 +33,34 @@ public class ExpenseController {
         List<ExpenseResponse> response = expenseService.getExpenses(groupId);
 
         return ResponseEntity.ok(response);
+    }
+
+    @PutMapping("/{expenseId}")
+    public ResponseEntity<ExpenseResponse> updateExpense(
+            @PathVariable UUID groupId,
+            @PathVariable UUID expenseId,
+            @Valid @RequestBody UpdateExpenseRequest request
+    ) {
+        ExpenseResponse response =
+                expenseService.updateExpense(
+                        groupId,
+                        expenseId,
+                        request
+                );
+
+        return ResponseEntity.ok(response);
+    }
+
+    @DeleteMapping("/{expenseId}")
+    public ResponseEntity<Void> archiveExpense(
+            @PathVariable UUID groupId,
+            @PathVariable UUID expenseId
+    ) {
+        expenseService.archiveExpense(
+                groupId,
+                expenseId
+        );
+
+        return ResponseEntity.noContent().build();
     }
 }

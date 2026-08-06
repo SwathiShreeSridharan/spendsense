@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import com.spendsense.expense.dto.CreateExpenseRequest;
 import com.spendsense.expense.dto.ExpenseResponse;
+import com.spendsense.expense.dto.UpdateExpenseRequest;
 import com.spendsense.expense.service.ExpenseService;
 import com.spendsense.security.CustomUserDetailsService;
 import com.spendsense.security.JwtAuthenticationFilter;
@@ -25,8 +26,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
-import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
-import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -155,6 +155,93 @@ public class ExpenseControllerTest {
 
         verify(expenseService)
                 .getExpenses(groupId);
+    }
+
+    @Test
+    void shouldUpdateExpenseSuccessfully() throws Exception {
+        UUID expenseId = UUID.randomUUID();
+        UUID categoryId = UUID.randomUUID();
+
+        UpdateExpenseRequest request =
+                new UpdateExpenseRequest(
+                        "Updated lunch",
+                        "Updated description",
+                        new BigDecimal("450.00"),
+                        LocalDate.of(2026, 8, 5),
+                        categoryId
+                );
+
+        ExpenseResponse response =
+                new ExpenseResponse(
+                        expenseId,
+                        "Updated lunch",
+                        "Updated description",
+                        new BigDecimal("450.00"),
+                        LocalDate.of(2026, 8, 5),
+                        categoryId,
+                        "Food",
+                        "restaurant",
+                        "#4CAF50",
+                        false
+                );
+
+        when(expenseService.updateExpense(
+                eq(groupId),
+                eq(expenseId),
+                any(UpdateExpenseRequest.class)
+        )).thenReturn(response);
+
+        mockMvc.perform(
+                        put(
+                                "/api/v1/groups/{groupId}/expenses/{expenseId}",
+                                groupId,
+                                expenseId
+                        )
+                                .contentType(MediaType.APPLICATION_JSON)
+                                .content(
+                                        objectMapper.writeValueAsString(
+                                                request
+                                        )
+                                )
+                )
+                .andExpect(status().isOk())
+
+                .andExpect(jsonPath("$.expenseId")
+                        .value(expenseId.toString()))
+
+                .andExpect(jsonPath("$.title")
+                        .value("Updated lunch"))
+
+                .andExpect(jsonPath("$.amount")
+                        .value(450.00))
+
+                .andExpect(jsonPath("$.categoryName")
+                        .value("Food"));
+
+        verify(expenseService).updateExpense(
+                eq(groupId),
+                eq(expenseId),
+                any(UpdateExpenseRequest.class)
+        );
+    }
+
+    @Test
+    void shouldArchiveExpenseSuccessfully() throws Exception {
+        UUID expenseId = UUID.randomUUID();
+
+        mockMvc.perform(
+                        delete(
+                                "/api/v1/groups/{groupId}/expenses/{expenseId}",
+                                groupId,
+                                expenseId
+                        )
+                )
+                .andExpect(status().isNoContent());
+
+        verify(expenseService).archiveExpense(
+                groupId,
+                expenseId
+        );
     }
 
 }

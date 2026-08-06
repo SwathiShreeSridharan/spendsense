@@ -13,6 +13,7 @@ import org.springframework.stereotype.Repository;
 import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 
 @Repository
@@ -22,12 +23,11 @@ public interface ExpenseRepository extends JpaRepository<Expense, UUID> {
             Group group
     );
 
-    long countByCreatedBy(User createdBy);
-
     @Query("""
             SELECT COALESCE(SUM(e.amount), 0)
             FROM Expense e
             WHERE e.createdBy = :user
+            AND e.archived = false
             """)
     BigDecimal getTotalExpense(
             @Param("user") User user
@@ -38,6 +38,7 @@ public interface ExpenseRepository extends JpaRepository<Expense, UUID> {
             FROM Expense e
             WHERE e.createdBy = :user
             AND e.expenseDate = :today
+            AND e.archived = false
             """)
     BigDecimal getTodayExpense(
             @Param("user") User user,
@@ -48,6 +49,7 @@ public interface ExpenseRepository extends JpaRepository<Expense, UUID> {
             SELECT COALESCE(SUM(e.amount), 0)
             FROM Expense e
             WHERE e.createdBy = :user
+            AND e.archived = false
             AND e.expenseDate BETWEEN :startDate AND :endDate
             """)
     BigDecimal getMonthExpense(
@@ -63,6 +65,7 @@ public interface ExpenseRepository extends JpaRepository<Expense, UUID> {
         )
         FROM Expense e
         WHERE e.createdBy = :user
+        AND e.archived = false
         GROUP BY e.category.name
         ORDER BY SUM(e.amount) DESC
         """)
@@ -76,6 +79,7 @@ public interface ExpenseRepository extends JpaRepository<Expense, UUID> {
             COALESCE(SUM(e.amount),0) AS amount
         FROM expenses e
         WHERE e.created_by = :userId
+        AND e.archived = false
         AND EXTRACT(YEAR FROM e.expense_date) = :year
         GROUP BY
             EXTRACT(MONTH FROM e.expense_date),
@@ -94,10 +98,31 @@ public interface ExpenseRepository extends JpaRepository<Expense, UUID> {
         FROM Expense e
         WHERE e.group = :group
           AND e.expenseDate BETWEEN :startDate AND :endDate
+          AND e.archived = false
         """)
     BigDecimal getTotalExpenseForBudgetPeriod(
             @Param("group") Group group,
             @Param("startDate") LocalDate startDate,
             @Param("endDate") LocalDate endDate
+    );
+
+    Optional<Expense> findByExpenseIdAndGroup(
+            UUID expenseId,
+            Group group
+    );
+
+    List<Expense>
+    findByGroupAndArchivedFalseOrderByExpenseDateDescCreatedAtDesc(
+            Group group
+    );
+
+    long countByCreatedByAndArchivedFalse(
+            User createdBy
+    );
+
+    Optional<Expense>
+    findByExpenseIdAndGroupAndArchivedFalse(
+            UUID expenseId,
+            Group group
     );
 }
